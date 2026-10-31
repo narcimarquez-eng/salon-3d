@@ -980,6 +980,24 @@ export default function App() {
         frameModel,
         captureDataUrl,
         setCameraViewPreset,
+        // Posición en el mundo de la primera malla cuyo nombre empieza por `prefijo`
+        worldPosOf: (prefijo: string): [number, number, number] | null => {
+          let found: THREE.Object3D | null = null;
+          scene.traverse((o) => {
+            if (!found && o.name.startsWith(prefijo)) found = o;
+          });
+          if (!found) return null;
+          const p = new THREE.Vector3();
+          (found as THREE.Object3D).getWorldPosition(p);
+          return [p.x, p.y, p.z];
+        },
+        // Coloca la cámara en `pos` mirando a `target` (coordenadas de escena)
+        setCameraPose: (pos: [number, number, number], target: [number, number, number]) => {
+          const trans = cameraTransitionRef.current;
+          trans.active = true;
+          trans.targetPos.set(pos[0], pos[1], pos[2]);
+          trans.targetLookAt.set(target[0], target[1], target[2]);
+        },
       };
     }
 
