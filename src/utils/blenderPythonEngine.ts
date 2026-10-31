@@ -4082,7 +4082,8 @@ export async function executeBlenderPythonScript(
             size: 1.0,
           });
           const s = Number(opts.size ?? 1.0);
-          const geo = new THREE.BoxGeometry(s, s, s, 4, 4, 4);
+          // 1 división por cara: 12 triángulos. El suavizado conserva las aristas duras de la caja.
+          const geo = new THREE.BoxGeometry(s, s, s, 1, 1, 1);
           return spawnPrimitiveMesh('Cube', geo, opts as any);
         },
         primitive_uv_sphere_add: (...rawArgs: unknown[]) => {
