@@ -6,6 +6,8 @@ import {defineConfig} from 'vite';
 export default defineConfig(() => {
   return {
     plugins: [react(), tailwindcss()],
+    // GitHub Pages sirve el proyecto desde /salon-3d/. En local (dev/build manual) la base sigue siendo '/'.
+    base: process.env.GITHUB_ACTIONS ? '/salon-3d/' : '/',
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
