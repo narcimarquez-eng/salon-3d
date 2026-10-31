@@ -99,9 +99,9 @@ def fuente(nombre, cx, cy, z0, n_chorros):
     bpy.anim.agua(cuenco, 1.0)
     for j in range(n_chorros):
         ang = j * 6.2832 / n_chorros
-        for k in range(3):
-            gota = caja(nombre + "_Gota", (cx, cy, z0 + 2.0), (0.14, 0.14, 0.14), agua)
-            bpy.anim.loop(gota, 1.6, trayectoria_chorro(ang, k / 3.0, 1.2, 1.8))
+        for k in range(4):
+            gota = caja(nombre + "_Gota", (cx, cy, z0 + 2.0), (0.45, 0.45, 0.45), agua)
+            bpy.anim.loop(gota, 1.6, trayectoria_chorro(ang, k / 4.0, 2.6, 1.7))
 
 fuente("Fuente1", -6.0, -6.0, 0.0, 10)
 fuente("Fuente2", 6.0, 11.0, 1.6, 8)
@@ -114,10 +114,10 @@ bpy.anim.agua(agua_estanque, 1.0)
 def trayectoria_cano(fase):
     def f(t):
         s = (t + fase) % 1.0
-        return (0.0, -0.9 * s, -0.15 * s * s)
+        return (0.0, -1.0 * s, -0.15 * s * s)
     return f
 for k in range(4):
-    gota = caja("Chorro", (-9.0, 3.55, 0.42), (0.12, 0.12, 0.12), agua)
+    gota = caja("Chorro", (-9.0, 3.55, 0.42), (0.35, 0.35, 0.35), agua)
     bpy.anim.loop(gota, 1.6, trayectoria_cano(k / 4.0))
 
 # ----- Arriates con flores -----
