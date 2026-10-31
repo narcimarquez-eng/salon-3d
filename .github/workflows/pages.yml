@@ -1,0 +1,48 @@
+name: Desplegar en GitHub Pages
+
+on:
+  push:
+    branches:
+      - claude/wizardly-thompson-ixy39w
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Instalar dependencias
+        run: bun install --frozen-lockfile
+
+      - name: Compilar
+        run: bun run build
+        env:
+          GITHUB_ACTIONS: "true"
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

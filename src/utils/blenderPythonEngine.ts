@@ -1007,6 +1007,8 @@ export function stripMarkdownCodeFences(raw: string): string {
 
   const lines = normalized.split('\n');
   // Si el usuario copió texto explicativo antes de `import bpy`, recortar el preámbulo conversacional
+  // Un script puede empezar directamente por una clase, un decorador, una asignación o un bucle
+  // (sin `import bpy`); si no se reconoce, se descartaría todo lo que hay antes del primer `def`/`import`.
   const firstCodeIdx = lines.findIndex((l) => {
     const t = l.trim();
     return (
@@ -1014,7 +1016,13 @@ export function stripMarkdownCodeFences(raw: string): string {
       /^from\s+(?:mathutils|math|random|bpy)/.test(t) ||
       /^bpy\.(?:ops|data|context)/.test(t) ||
       /^#/.test(t) ||
-      /^def\s+[a-zA-Z_]/.test(t)
+      /^def\s+[a-zA-Z_]/.test(t) ||
+      /^class\s+[a-zA-Z_]\w*\s*(?:\([^)]*\))?\s*:$/.test(t) ||
+      /^@[a-zA-Z_]\w*\s*(?:\(.*\))?$/.test(t) ||
+      /^for\s+[a-zA-Z_]\w*\s+in\s+.+:$/.test(t) ||
+      /^with\s+bpy\.[\w.]+\(.*\)\s*:$/.test(t) ||
+      /^try\s*:$/.test(t) ||
+      /^[a-zA-Z_][\w.\[\]'"]*\s*[+\-*/]?=(?!=)\s*\S/.test(t)
     );
   });
 
@@ -1818,6 +1826,14 @@ function convertPythonTuplesToArrays(code: string): string {
  * `//`, `**`, slicing `[:3]`, índices negativos `[-1]`, unpacking `*arr`, lambdas, `@`, sets) respetando strings.
  */
 function rewritePythonSyntaxInLine(line: string, isForOrCompHeader: boolean = false): string {
+  // 0. Conjuntos estilo Blender (`return {'FINISHED'}`) se reescriben sobre la línea completa.
+  // Deben hacerse antes de segmentar: al separar las strings, la llave y la cadena quedan en
+  // segmentos distintos y ninguna regla de conjuntos llegaría a casar (provocaba "Unexpected string").
+  line = line.replace(
+    /(^|[^a-zA-Z0-9_$.'"])\{\s*(['"][A-Za-z_0-9]+['"](?:\s*,\s*['"][A-Za-z_0-9]+['"])*)\s*\}/g,
+    '$1new Set([$2])'
+  );
+
   // 1. Separar en segmentos fuera y dentro de strings para no alterar literales de texto
   const segments: { text: string; isString: boolean }[] = [];
   let cur = '';
@@ -1879,10 +1895,6 @@ function rewritePythonSyntaxInLine(line: string, isForOrCompHeader: boolean = fa
         'bpy._add($1, $2).$3'
       );
 
-      // Retornos de conjuntos estilo Blender: `return {'FINISHED'}` o `return {'CANCELLED'}`
-      t = t.replace(/\breturn\s*\{\s*(['"][A-Z_a-z0-9]+['"](?:\s*,\s*['"][A-Z_a-z0-9]+['"])*)\s*\}/g, 'return new Set([$1])');
-      // Literales de conjuntos como `{'FINISHED', 'PASS_THROUGH'}` sin clave-valor
-      t = t.replace(/(^|[^a-zA-Z0-9_$.])\{\s*(['"][A-Z_a-z0-9]+['"](?:\s*,\s*['"][A-Z_a-z0-9]+['"])*)\s*\}/g, '$1new Set([$2])');
       // Multiplicación de matrices con operador `@` de Blender / Python: `mat @ vec`
       while (/([a-zA-Z0-9_.[\]()]+)\s*@\s*([a-zA-Z0-9_.[\]()]+)/.test(t)) {
         t = t.replace(/([a-zA-Z0-9_.[\]()]+)\s*@\s*([a-zA-Z0-9_.[\]()]+)/, 'bpy._matmul($1, $2)');
@@ -5712,7 +5724,7 @@ export async function executeBlenderPythonScript(
       const isContinuationClause =
         trimmed === 'else:' ||
         /^elif\s+.+:$/.test(trimmed) ||
-        /^except(?:\s+.*)?:$/.test(trimmed) ||
+        /^except\b.*:$/.test(trimmed) ||
         trimmed === 'finally:';
 
       while (
@@ -5885,11 +5897,17 @@ export async function executeBlenderPythonScript(
       }
 
       // Manejar cláusulas `except:` o `except Exception as e:` vinculando las variables e, err, error
-      const exceptMatch = trimmed.match(/^except(?:\s+([a-zA-Z0-9_., ()\[\]]+?)(?:\s+as\s+([a-zA-Z_]\w*))?)?\s*:$/);
-      if (exceptMatch || trimmed === 'except:') {
-        const errVar = exceptMatch?.[2] || '__pyErr';
-        transformedLines.push(`${indentStr}} catch (${errVar}) {`);
-        transformedLines.push(`${indentStr}  let e = ${errVar}; let err = ${errVar}; let error = ${errVar};`);
+      // Acepta `except:`, `except X:`, `except X as e:`, `except (A, B) as err:` y `except(A, B):` (sin espacio).
+      const exceptMatch = trimmed.match(/^except\b\s*[^:]*?(?:\s+as\s+([a-zA-Z_]\w*))?\s*:$/);
+      if (exceptMatch) {
+        // El parámetro del catch es siempre `__pyErr` para no colisionar con `let e` cuando la
+        // variable del `as` se llama igual (`except Exception as e:` -> "Identifier 'e' has already been declared").
+        const boundName = exceptMatch[1];
+        const aliases = Array.from(new Set(['e', 'err', 'error', ...(boundName ? [boundName] : [])]));
+        transformedLines.push(`${indentStr}} catch (__pyErr) {`);
+        transformedLines.push(
+          `${indentStr}  ${aliases.map((name) => `let ${name} = __pyErr;`).join(' ')}`
+        );
         blockStack.push({ headerIndent: currentIndent });
         continue;
       }
