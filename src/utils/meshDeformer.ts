@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { animatedMeshNames, buildBlenderClips, exportMaterialFor } from './blenderAnimation';
 import { SimplifyModifier } from 'three/addons/modifiers/SimplifyModifier.js';
 import { TessellateModifier } from 'three/addons/modifiers/TessellateModifier.js';
 import { prepareGeometryNormals, applyNormalSmoothingToModel } from './geometrySmoothing';
@@ -935,8 +936,10 @@ function mergeMeshesByMaterial(root: THREE.Object3D): void {
     if (child !== root && (child as THREE.Mesh).isMesh) meshes.push(child as THREE.Mesh);
   });
 
+  const animated = animatedMeshNames();
   const groups = new Map<string, THREE.Mesh[]>();
   for (const mesh of meshes) {
+    if (animated.has(mesh.name)) continue;
     const key = mergeKeyFor(mesh);
     if (key === null) continue;
     const list = groups.get(key) ?? [];
@@ -987,6 +990,10 @@ export function exportModifiedGlb(
     // no pertenece al modelo: el exportador lo serializaría como extras del JSON y el GLB
     // llegaba a pesar decenas de MB. Se vacía en las copias que se exportan.
     clonedRoot.traverse((child) => {
+      const exportMat = exportMaterialFor(child.name);
+      if (exportMat && (child as THREE.Mesh).isMesh) {
+        (child as THREE.Mesh).material = exportMat;
+      }
       child.userData = {};
     });
 
@@ -1016,7 +1023,7 @@ export function exportModifiedGlb(
         console.error('Error al exportar GLTF:', error);
         reject(error);
       },
-      { binary: true }
+      { binary: true, animations: buildBlenderClips() }
     );
   });
 }

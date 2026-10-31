@@ -27,7 +27,8 @@ luz = material("Farol", (1.0, 0.75, 0.40), 0.30, 3.0)
 
 # Número pseudoaleatorio determinista en [0, 1) (siempre el mismo jardín)
 def rnd(i):
-    return (math.sin(i * 12.9898 + 78.233) * 43758.5453) % 1.0
+    x = math.sin(i * 12.9898 + 78.233) * 43758.5453
+    return x - math.floor(x)
 
 # ----- Terreno y niveles -----
 caja("Terreno", (0, 0, -0.1), (60, 60, 0.1), hierba)
@@ -77,33 +78,47 @@ for k in range(160):
     caja("Enredadera", (v, 13.8, z), (0.26, 0.06, 0.22), enredadera)
     caja("Enredadera", (13.8, v * 0.9, z), (0.06, 0.26, 0.22), enredadera)
 
-# ----- Fuentes de surtidor -----
+# ----- Fuentes de surtidor animadas -----
+# Trayectoria de una gota: sale del cuenco, sube en parábola y cae a la piscina.
+# t va de 0 a 1 y se repite (bucle). Devuelve el desplazamiento respecto al cuenco.
+def trayectoria_chorro(ang, fase, altura, radio):
+    def f(t):
+        s = (t + fase) % 1.0
+        r = radio * s
+        z = 4.0 * altura * s * (1.0 - s) - 1.5 * s * s
+        return (r * math.cos(ang), r * math.sin(ang), z)
+    return f
+
 def fuente(nombre, cx, cy, z0, n_chorros):
     cilindro(nombre + "_Borde", (cx, cy, z0 + 0.25), 2.2, 0.5, piedra_clara)
-    cilindro(nombre + "_Agua", (cx, cy, z0 + 0.53), 1.95, 0.05, agua)
+    pileta = cilindro(nombre + "_Agua", (cx, cy, z0 + 0.53), 1.95, 0.05, agua)
+    bpy.anim.agua(pileta, 1.0)
     cilindro(nombre + "_Pedestal", (cx, cy, z0 + 1.1), 0.35, 1.2, piedra)
     cilindro(nombre + "_Cuenco", (cx, cy, z0 + 1.75), 0.9, 0.25, piedra_clara)
-    cilindro(nombre + "_AguaCuenco", (cx, cy, z0 + 1.84), 0.75, 0.04, agua)
+    cuenco = cilindro(nombre + "_AguaCuenco", (cx, cy, z0 + 1.84), 0.75, 0.04, agua)
+    bpy.anim.agua(cuenco, 1.0)
     for j in range(n_chorros):
         ang = j * 6.2832 / n_chorros
-        for t in range(1, 13):
-            if t <= 6:
-                r = 0.2 + 0.3 * t
-                z = z0 + 2.0 + 0.8 * t - 0.1 * t * t
-            else:
-                r = 0.2 + 0.3 * 6 + 0.1 * (t - 6)
-                z = z0 + 2.0 + 0.8 * 6 - 0.6 - 0.7 * (t - 6) * 2.0 / 2.0
-            caja(nombre + "_Gota", (cx + r * math.cos(ang), cy + r * math.sin(ang), z), (0.14, 0.14, 0.14), agua)
+        for k in range(3):
+            gota = caja(nombre + "_Gota", (cx, cy, z0 + 2.0), (0.14, 0.14, 0.14), agua)
+            bpy.anim.loop(gota, 1.6, trayectoria_chorro(ang, k / 3.0, 1.2, 1.8))
 
 fuente("Fuente1", -6.0, -6.0, 0.0, 10)
 fuente("Fuente2", 6.0, 11.0, 1.6, 8)
 
-# Fuente de pared: caño en el muro y estanque con chorro de agua
+# Fuente de pared: caño en el muro, estanque y chorro que cae al agua
 caja("Caño", (-9.0, 3.65, 0.45), (0.25, 0.4, 0.25), piedra)
-caja("Estanque", (-9.0, 2.6, 0.12), (2.4, 1.6, 0.25), piedra_clara)
-caja("EstanqueAgua", (-9.0, 2.6, 0.27), (2.2, 1.4, 0.04), agua)
-for t in range(1, 7):
-    caja("Chorro", (-9.0, 3.6 - 0.1 * t, 0.45 - 0.05 * t), (0.14, 0.14, 0.14), agua)
+estanque = caja("Estanque", (-9.0, 2.6, 0.12), (2.4, 1.6, 0.25), piedra_clara)
+agua_estanque = caja("EstanqueAgua", (-9.0, 2.6, 0.27), (2.2, 1.4, 0.04), agua)
+bpy.anim.agua(agua_estanque, 1.0)
+def trayectoria_cano(fase):
+    def f(t):
+        s = (t + fase) % 1.0
+        return (0.0, -0.9 * s, -0.15 * s * s)
+    return f
+for k in range(4):
+    gota = caja("Chorro", (-9.0, 3.55, 0.42), (0.12, 0.12, 0.12), agua)
+    bpy.anim.loop(gota, 1.0, trayectoria_cano(k / 4.0))
 
 # ----- Arriates con flores -----
 def flor(x, y, z0, k):

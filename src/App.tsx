@@ -85,6 +85,7 @@ import {
   saveMasterDrawingCheckpoint,
   restoreMasterDrawingCheckpoint,
 } from './utils/meshDeformer';
+import { tickBlenderAnimations } from './utils/blenderAnimation';
 import {
   BLENDER_SCRIPT_PRESETS,
   BlenderCoordinateMode,
@@ -1047,6 +1048,7 @@ export default function App() {
       if (currentMixer) {
         currentMixer.update(delta);
       }
+      tickBlenderAnimations(clock.getElapsedTime());
 
       // Interpolación suave de presets de cámara (Exponential Damping)
       const camTrans = cameraTransitionRef.current;

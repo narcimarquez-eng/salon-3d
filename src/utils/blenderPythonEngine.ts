@@ -8,6 +8,7 @@ import {
   createThreeToneGradientTexture,
 } from './geometrySmoothing';
 import { getProceduralMatcapTexture } from './matcapGenerator';
+import { addBlenderLoop, setBlenderWater, startBlenderRun, finalizeBlenderRun } from './blenderAnimation';
 
 // PURGA DEFENSIVA INMEDIATA: NUNCA extender Object.prototype (propiedades como 'get' o 'value'
 // rompen la especificación ECMAScript de descriptores en Object.defineProperty para React y librerías).
@@ -880,6 +881,9 @@ function applyMaterialToThreeMesh(
   emissionColor?: THREE.Color | null,
   emissionStrength: number = 0
 ) {
+  // Las superficies de agua (bpy.anim.agua) usan un shader propio y no reciben colores de material
+  if ((mesh.material as THREE.Material).type === 'ShaderMaterial') return;
+
   const effectiveColor =
     emissionColor && emissionStrength > 0.5
       ? color.clone().lerp(emissionColor, 0.65)
@@ -2379,6 +2383,7 @@ export async function executeBlenderPythonScript(
   }
 ): Promise<ScriptExecutionResult> {
   ensurePythonArrayMethods();
+  startBlenderRun();
 
   const startTime = performance.now();
   const logs: string[] = [];
@@ -3585,6 +3590,32 @@ export async function executeBlenderPythonScript(
 
   const bpy = {
     _extractArgs: extractPyArgs,
+    // Animaciones: bpy.anim.loop(objeto, duracion, funcion(t)) y bpy.anim.agua(objeto)
+    anim: {
+      loop: (objProxy: any, duracion: any, funcion: any) => {
+        const mesh: THREE.Object3D | undefined = objProxy?._threeMesh ?? objProxy;
+        if (!mesh || typeof funcion !== 'function') return;
+        addBlenderLoop({
+          object: mesh,
+          base: mesh.position.clone(),
+          scale: 1,
+          duration: Math.max(0.1, Number(duracion) || 1.0),
+          sample: (t: number): [number, number, number] => {
+            const r = funcion(t);
+            return [Number(r[0]) || 0, Number(r[1]) || 0, Number(r[2]) || 0];
+          },
+          toThree: (v: [number, number, number]): [number, number, number] =>
+            isZUp ? [v[0], v[2], -v[1]] : [v[0], v[1], v[2]],
+        });
+      },
+      agua: (objProxy: any, velocidad: any = 1.0) => {
+        const mesh: THREE.Mesh | undefined = objProxy?._threeMesh;
+        if (!mesh || !(mesh as THREE.Mesh).isMesh) return;
+        const mat = mesh.material as THREE.MeshStandardMaterial;
+        const color = mat && mat.color ? mat.color.clone() : new THREE.Color('#38bdf8');
+        setBlenderWater(mesh, color, Number(velocidad) || 1.0);
+      },
+    },
     _get: (obj: any, key: any, defVal: any = null) => {
       if (obj == null) return defVal;
       if (typeof obj.get === 'function') {
@@ -6180,6 +6211,7 @@ export async function executeBlenderPythonScript(
 
     // 8. Si el script se ejecutó en modo Blender 5.2 (Z-Up) y creó objetos nuevos,
     // auto-ajustar escala si excede el visor y apoyar la base sobre el pedestal Y=0.02
+    let autoScaleFactor = 1;
     if (isZUp && objectsCreatedCount > 0 && meshes.length > 0) {
       let minX = Infinity, maxX = -Infinity;
       let minY = Infinity, maxY = -Infinity;
@@ -6204,6 +6236,7 @@ export async function executeBlenderPythonScript(
       // Si el modelo de la web es gigantesco (> 4.2m) o diminuto (< 0.6m), normalizar a ~2.6m de altura
       if (Number.isFinite(spanMax) && (spanMax > 4.2 || spanMax < 0.6) && spanMax > 0.001) {
         const normFactor = 2.6 / spanMax;
+        autoScaleFactor = normFactor;
         const centerX = (minX + maxX) * 0.5;
         const centerZ = (minZ + maxZ) * 0.5;
         meshes.forEach((m) => {
@@ -6222,6 +6255,9 @@ export async function executeBlenderPythonScript(
         });
       }
     }
+
+    // Las animaciones de posición siguen a la malla tras el auto-escalado del modelo
+    finalizeBlenderRun(autoScaleFactor);
 
     if (manualEdits > 0 || totalVerticesModified > 0 || objectsCreatedCount > 0) {
       meshes.forEach((m) => {
