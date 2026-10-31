@@ -920,6 +920,13 @@ export function exportModifiedGlb(
     });
     outlinesToRemove.forEach((obj) => obj.removeFromParent());
 
+    // El userData de la app (historial de deshacer, normales, materiales de respaldo y matcaps)
+    // no pertenece al modelo: el exportador lo serializaría como extras del JSON y el GLB
+    // llegaba a pesar decenas de MB. Se vacía en las copias que se exportan.
+    clonedRoot.traverse((child) => {
+      child.userData = {};
+    });
+
     exportScene.add(clonedRoot);
 
     const exporter = new GLTFExporter();
