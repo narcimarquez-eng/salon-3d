@@ -297,6 +297,8 @@ export default function App() {
     setCameraViewPreset: (preset: CameraPresetType) => void;
     recalculateStats: () => void;
     captureScreenshot: () => void;
+    captureDataUrl: () => string;
+    frameModel: (margen?: number) => void;
   } | null>(null);
 
   // Actualizar suavizado de normales cuando cambia el control deslizante
@@ -800,17 +802,41 @@ export default function App() {
       );
     };
 
-    const captureScreenshot = () => {
+    // Renderiza el frame actual y devuelve la imagen PNG en formato data URL (sin indicadores del pincel)
+    const captureDataUrl = (): string => {
       brushIndicator.visible = false;
       symmetryIndicator.visible = false;
       if (isSoftwareGl) renderer.render(scene, camera);
       else composer.render();
+      return renderer.domElement.toDataURL('image/png');
+    };
 
-      const dataUrl = renderer.domElement.toDataURL('image/png');
+    const captureScreenshot = () => {
+      const dataUrl = captureDataUrl();
       const link = document.createElement('a');
       link.href = dataUrl;
       link.download = 'captura_celshade_3d.png';
       link.click();
+    };
+
+    // Encuadra todo el modelo: cámara en vista 3/4 a la distancia necesaria para que quepa
+    // entero en pantalla (en alto y en ancho). `margen` > 1 aleja la cámara.
+    const frameModel = (margen: number = 1.25) => {
+      if (!currentModelWrapper) return;
+      const box = new THREE.Box3().setFromObject(currentModelWrapper);
+      if (box.isEmpty()) return;
+      const sphere = box.getBoundingSphere(new THREE.Sphere());
+      const vfov = THREE.MathUtils.degToRad(camera.fov);
+      const hfov = 2 * Math.atan(Math.tan(vfov / 2) * camera.aspect);
+      const distV = sphere.radius / Math.sin(vfov / 2);
+      const distH = sphere.radius / Math.sin(hfov / 2);
+      const distancia = Math.max(distV, distH) * margen;
+
+      const direccion = new THREE.Vector3(0.85, 0.45, 3.45).normalize();
+      const trans = cameraTransitionRef.current;
+      trans.active = true;
+      trans.targetLookAt.copy(sphere.center);
+      trans.targetPos.copy(sphere.center).addScaledVector(direccion, distancia);
     };
 
     // Raycasting para detección y escultura con el ratón (Soporta Clic Izquierdo para esculpir y Clic Derecho para orbitar)
@@ -944,7 +970,18 @@ export default function App() {
       setCameraViewPreset,
       recalculateStats,
       captureScreenshot,
+      captureDataUrl,
+      frameModel,
     };
+
+    // API opcional para depurar y capturar el visor desde fuera: solo se activa con ?visor-api=1
+    if (new URLSearchParams(window.location.search).has('visor-api')) {
+      (window as unknown as { celshadeViewer: unknown }).celshadeViewer = {
+        frameModel,
+        captureDataUrl,
+        setCameraViewPreset,
+      };
+    }
 
     loadProceduralFallback();
 
@@ -3355,8 +3392,8 @@ export default function App() {
             <div className="flex items-center gap-2 shrink-0">
               <button
                 type="button"
-                onClick={() => sceneRefs.current?.setCameraViewPreset('hero')}
-                title="Centrar Cámara"
+                onClick={() => sceneRefs.current?.frameModel(1.25)}
+                title="Encuadrar el modelo completo"
                 className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-slate-200 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
