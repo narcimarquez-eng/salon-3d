@@ -22,6 +22,9 @@ const _tempVecB = new THREE.Vector3();
 const _tempVecC = new THREE.Vector3();
 const _center = new THREE.Vector3();
 
+// Ángulo a partir del cual dos caras se consideran una arista dura (no se suavizan entre sí)
+const CREASE_ANGLE_DEG = 60;
+
 /**
  * Crea una textura 1D (DataTexture) de 3 escalones bien luminosos para Cel-Shading (Toon).
  * Evita sombras demasiado oscuras para que todos los detalles del enemigo se vean con claridad.
@@ -68,48 +71,66 @@ export function prepareGeometryNormals(mesh: THREE.Mesh): void {
     _center.set(0, 0, 0);
   }
 
-  // Agrupar vértices por posición espacial cuantizada (tolerancia 1e-3) para soldar aristas duras
-  const spatialMap = new Map<string, THREE.Vector3>();
+  // Agrupar los vértices por posición espacial cuantizada (tolerancia 1e-3).
+  // Cada vértice se suaviza solo con las caras de su mismo punto cuyo ángulo es menor que
+  // CREASE_ANGLE_DEG: las superficies orgánicas quedan lisas, y las aristas duras (p. ej. las de
+  // una caja, de 90°) conservan su normal plana en lugar de redondearse.
+  const groups = new Map<string, number[]>();
   const precision = 1000;
-
   for (let i = 0; i < vertexCount; i++) {
     const vx = posAttr.getX(i);
     const vy = posAttr.getY(i);
     const vz = posAttr.getZ(i);
     const key = `${Math.round(vx * precision)}_${Math.round(vy * precision)}_${Math.round(vz * precision)}`;
-
-    const nx = flatNormals[i * 3];
-    const ny = flatNormals[i * 3 + 1];
-    const nz = flatNormals[i * 3 + 2];
-
-    let acc = spatialMap.get(key);
-    if (!acc) {
-      acc = new THREE.Vector3(nx, ny, nz);
-      spatialMap.set(key, acc);
+    const list = groups.get(key);
+    if (list) {
+      list.push(i);
     } else {
-      acc.x += nx;
-      acc.y += ny;
-      acc.z += nz;
+      groups.set(key, [i]);
     }
   }
 
-  spatialMap.forEach((vec) => vec.normalize());
+  const creaseCos = Math.cos(THREE.MathUtils.degToRad(CREASE_ANGLE_DEG));
+  const weldedArr = new Float32Array(vertexCount * 3);
+  groups.forEach((list) => {
+    for (let a = 0; a < list.length; a++) {
+      const i = list[a];
+      const ix = flatNormals[i * 3];
+      const iy = flatNormals[i * 3 + 1];
+      const iz = flatNormals[i * 3 + 2];
+      let sx = 0;
+      let sy = 0;
+      let sz = 0;
+      for (let b = 0; b < list.length; b++) {
+        const j = list[b];
+        const jx = flatNormals[j * 3];
+        const jy = flatNormals[j * 3 + 1];
+        const jz = flatNormals[j * 3 + 2];
+        if (ix * jx + iy * jy + iz * jz >= creaseCos) {
+          sx += jx;
+          sy += jy;
+          sz += jz;
+        }
+      }
+      _tempVecB.set(sx, sy, sz).normalize();
+      weldedArr[i * 3] = _tempVecB.x;
+      weldedArr[i * 3 + 1] = _tempVecB.y;
+      weldedArr[i * 3 + 2] = _tempVecB.z;
+    }
+  });
 
-  // Segunda pasada: rellenar weldedSmoothNormals y sphericalNormals
   for (let i = 0; i < vertexCount; i++) {
     const vx = posAttr.getX(i);
     const vy = posAttr.getY(i);
     const vz = posAttr.getZ(i);
-    const key = `${Math.round(vx * precision)}_${Math.round(vy * precision)}_${Math.round(vz * precision)}`;
+    weldedSmoothNormals[i * 3] = weldedArr[i * 3];
+    weldedSmoothNormals[i * 3 + 1] = weldedArr[i * 3 + 1];
+    weldedSmoothNormals[i * 3 + 2] = weldedArr[i * 3 + 2];
 
-    const welded = spatialMap.get(key)!;
-    weldedSmoothNormals[i * 3] = welded.x;
-    weldedSmoothNormals[i * 3 + 1] = welded.y;
-    weldedSmoothNormals[i * 3 + 2] = welded.z;
-
-    // Normal esférica: mezcla entre la normal soldada (62%) y el vector radial desde el centro (38%)
+    // Normal esférica: mezcla entre la normal suavizada (62%) y el vector radial desde el centro (38%)
     _tempVecA.set(vx - _center.x, vy - _center.y, vz - _center.z).normalize();
-    _tempVecB.copy(welded).lerp(_tempVecA, 0.38).normalize();
+    _tempVecC.set(weldedArr[i * 3], weldedArr[i * 3 + 1], weldedArr[i * 3 + 2]);
+    _tempVecB.copy(_tempVecC).lerp(_tempVecA, 0.38).normalize();
 
     sphericalNormals[i * 3] = _tempVecB.x;
     sphericalNormals[i * 3 + 1] = _tempVecB.y;
