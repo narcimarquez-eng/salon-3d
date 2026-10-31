@@ -140,21 +140,32 @@ export function exportMaterialFor(meshName: string): THREE.Material | undefined 
   return exportMaterials.get(meshName);
 }
 
-/** Clips de animación en bucle para exportar al .glb (una pista de posición por malla). */
+/**
+ * Un único clip para exportar al .glb con una pista de posición por malla. Así un reproductor
+ * que solo toma el primer clip anima todas las gotas, no solo una.
+ * La duración del clip es la mayor de los bucles; cada pista se repite con su propio periodo.
+ * Para que el bucle sea continuo, las duraciones deben ser múltiplos unas de otras.
+ */
 export function buildBlenderClips(): THREE.AnimationClip[] {
-  const clips: THREE.AnimationClip[] = [];
-  for (const entry of loops) {
-    if (!entry.object.parent) continue;
-    const times: number[] = [];
+  const active = loops.filter((e) => e.object.parent);
+  if (active.length === 0) return [];
+
+  const total = Math.max(...active.map((e) => e.duration));
+  const frames = Math.max(SAMPLES_PER_LOOP, Math.round(total * SAMPLES_PER_LOOP));
+  const times: number[] = [];
+  for (let k = 0; k <= frames; k++) {
+    times.push((k / frames) * total);
+  }
+
+  const tracks = active.map((entry) => {
     const values: number[] = [];
-    for (let k = 0; k <= SAMPLES_PER_LOOP; k++) {
-      const t = k / SAMPLES_PER_LOOP;
+    for (const time of times) {
+      const t = (time / entry.duration) % 1;
       const d = offsetOf(entry, t);
-      times.push(t * entry.duration);
       values.push(entry.base.x + d[0], entry.base.y + d[1], entry.base.z + d[2]);
     }
-    const track = new THREE.VectorKeyframeTrack(`${entry.object.name}.position`, times, values);
-    clips.push(new THREE.AnimationClip(`ciclo_${entry.object.name}`, entry.duration, [track]));
-  }
-  return clips;
+    return new THREE.VectorKeyframeTrack(`${entry.object.name}.position`, times.slice(), values);
+  });
+
+  return [new THREE.AnimationClip('ciclo', total, tracks)];
 }

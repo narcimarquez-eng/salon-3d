@@ -118,7 +118,7 @@ def trayectoria_cano(fase):
     return f
 for k in range(4):
     gota = caja("Chorro", (-9.0, 3.55, 0.42), (0.12, 0.12, 0.12), agua)
-    bpy.anim.loop(gota, 1.0, trayectoria_cano(k / 4.0))
+    bpy.anim.loop(gota, 1.6, trayectoria_cano(k / 4.0))
 
 # ----- Arriates con flores -----
 def flor(x, y, z0, k):
@@ -166,6 +166,31 @@ for k in range(50):
     x = -2.0 + 4.0 * rnd(k + 601)
     y = -10.5 + 4.0 * rnd(k + 701)
     caja("Enredadera", (x, y, 2.7 + 0.2 * rnd(k + 801)), (0.26, 0.26, 0.12), enredadera)
+
+# ----- Detalles: remates de muros, setos, piedras de paso, faroles, estanque y jardineras -----
+nenufar = material("Nenufar", (0.20, 0.52, 0.22), 0.80)
+for x in [-12.5, -9.5, -6.5, -3.5, 0.0, 3.5, 6.5, 9.5, 12.5]:
+    caja("RemateMuro", (x, 4.0, 0.9), (2.6, 0.5, 0.2), piedra_clara)
+    caja("RemateMuro", (x, 8.0, 1.7), (2.6, 0.5, 0.2), piedra_clara)
+for y in [-12.0, -9.0, -6.0, -3.0]:
+    caja("Seto", (-12.6, y, 0.5), (1.0, 2.2, 1.0), hojas_arbol)
+    caja("Seto", (12.6, y, 0.5), (1.0, 2.2, 1.0), hojas_arbol)
+for k in range(6):
+    caja("PiedraPaso", (4.5, -12.0 + k * 2.0, 0.02), (0.9, 0.7, 0.04), piedra_clara)
+for y in [-12.0, -6.0, -1.0]:
+    for x in [-2.6, 2.6]:
+        caja("PosteFarol", (x, y, 0.9), (0.12, 0.12, 1.8), madera)
+        esfera("Farol", (x, y, 1.9), 0.18, luz)
+cilindro("PozoBorde", (9.0, -9.0, 0.12), 1.8, 0.24, piedra_clara)
+estanque_agua = cilindro("EstanqueJardin", (9.0, -9.0, 0.25), 1.6, 0.04, agua)
+bpy.anim.agua(estanque_agua, 0.7)
+for k in range(6):
+    ang = k * 1.047
+    cilindro("Nenufar", (9.0 + 0.9 * math.cos(ang), -9.0 + 0.9 * math.sin(ang), 0.29), 0.3, 0.02, nenufar)
+caja("Jardinera", (-12.0, 11.0, 1.9), (0.8, 0.8, 0.6), piedra)
+caja("Jardinera", (12.0, 11.0, 1.9), (0.8, 0.8, 0.6), piedra)
+caja("Jardinera", (-12.0, 6.0, 1.1), (0.8, 0.8, 0.6), piedra)
+caja("Jardinera", (12.0, 6.0, 1.1), (0.8, 0.8, 0.6), piedra)
 
 # ----- Bancos -----
 for pos in [(-4.0, 11.0), (4.0, 11.0)]:
