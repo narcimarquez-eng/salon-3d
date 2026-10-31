@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { SimplifyModifier } from 'three/addons/modifiers/SimplifyModifier.js';
 import { TessellateModifier } from 'three/addons/modifiers/TessellateModifier.js';
 import { prepareGeometryNormals, applyNormalSmoothingToModel } from './geometrySmoothing';
@@ -904,6 +905,68 @@ export async function decimateModelGeometry(
 /**
  * Exporta el modelo 3D actual modificado como un archivo `.glb` binario.
  */
+/**
+ * Clave de agrupación: mallas con el mismo tipo de material, color, rugosidad, emisión y atributos
+ * pueden unirse. Devuelve null si la malla no debe unirse (skinning, morph targets o materiales múltiples).
+ */
+function mergeKeyFor(mesh: THREE.Mesh): string | null {
+  if ((mesh as THREE.SkinnedMesh).isSkinnedMesh) return null;
+  if (mesh.morphTargetInfluences && mesh.morphTargetInfluences.length > 0) return null;
+  if (Array.isArray(mesh.material)) return null;
+  const mat = mesh.material as THREE.MeshStandardMaterial;
+  if (!mat || !mat.color) return null;
+  const attrs = Object.keys(mesh.geometry.attributes).sort().join(',');
+  const emissive = mat.emissive ? mat.emissive.getHex() : 0;
+  const emissiveIntensity = mat.emissiveIntensity ?? 0;
+  return [mat.type, mat.color.getHex(), mat.roughness, mat.metalness, emissive, emissiveIntensity, attrs].join('|');
+}
+
+/**
+ * Une las mallas de `root` que comparten material en una malla por grupo.
+ * Las geometrías se transforman a la escala local de `root`; el resultado queda sin jerarquía.
+ * Si una unión falla, las mallas de ese grupo se dejan como estaban.
+ */
+function mergeMeshesByMaterial(root: THREE.Object3D): void {
+  root.updateMatrixWorld(true);
+  const rootInverse = new THREE.Matrix4().copy(root.matrixWorld).invert();
+
+  const meshes: THREE.Mesh[] = [];
+  root.traverse((child) => {
+    if (child !== root && (child as THREE.Mesh).isMesh) meshes.push(child as THREE.Mesh);
+  });
+
+  const groups = new Map<string, THREE.Mesh[]>();
+  for (const mesh of meshes) {
+    const key = mergeKeyFor(mesh);
+    if (key === null) continue;
+    const list = groups.get(key) ?? [];
+    list.push(mesh);
+    groups.set(key, list);
+  }
+
+  let index = 0;
+  groups.forEach((list) => {
+    if (list.length < 2) return;
+
+    const geometries = list.map((mesh) => {
+      const geo = mesh.geometry.index ? mesh.geometry.toNonIndexed() : mesh.geometry.clone();
+      const relative = new THREE.Matrix4().multiplyMatrices(rootInverse, mesh.matrixWorld);
+      geo.applyMatrix4(relative);
+      return geo;
+    });
+
+    const merged = mergeGeometries(geometries, false);
+    if (!merged) return;
+
+    list.forEach((mesh) => mesh.removeFromParent());
+    const material = list[0].material as THREE.Material;
+    const combined = new THREE.Mesh(merged, material);
+    combined.name = `Grupo_${index}_${list.length}piezas`;
+    root.add(combined);
+    index++;
+  });
+}
+
 export function exportModifiedGlb(
   root: THREE.Object3D,
   fileName: string = 'enemigo_modificado.glb'
@@ -926,6 +989,11 @@ export function exportModifiedGlb(
     clonedRoot.traverse((child) => {
       child.userData = {};
     });
+
+    // Une las mallas que comparten material en una sola malla por grupo. Así el GLB tiene
+    // muchas menos llamadas de dibujado (las piezas de escenas construidas con scripts son
+    // cientos de cajas con el mismo aspecto). La geometría no cambia.
+    mergeMeshesByMaterial(clonedRoot);
 
     exportScene.add(clonedRoot);
 
