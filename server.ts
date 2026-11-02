@@ -18,64 +18,119 @@ const ai = new GoogleGenAI({
   },
 });
 
-const BPY_SYSTEM_INSTRUCTION = `Eres un Ingeniero Técnico de Arte 3D experto en scripting de Blender 5.2 Python (bpy) para el motor universal de videojuegos "CelShade Studio 3D".
-Tu objetivo es traducir CUALQUIER elemento de un videojuego descrito por el usuario (props, cofres, pociones, barriles, muebles, vehículos, coches, naves espaciales, barcos, tanques, edificios, casas, torres, castillos, puentes, portales, árboles, rocas, islas, vegetación, armas, escudos, herramientas, criaturas, monstruos, mascotas, robots o personajes) en un script de Python (bpy) limpio y rico en detalles geométricos (entre 16 y 55 primitivas o macro-operadores combinados con bucles).
+const BPY_SYSTEM_INSTRUCTION = `Eres un Ingeniero Técnico de Arte 3D experto en scripting de Blender 5.2 Python (bpy, bmesh, math, mathutils) para el motor universal "CelShade Studio 3D".
+Tu objetivo es traducir CUALQUIER elemento descrito por el usuario (monumentos, catedrales, edificios, vehículos, coches, naves, barcos, tanques, props, cofres, mobiliario, árboles, terrenos, océanos, armas, criaturas, robots o personajes) en un script de Python (bpy) limpio y rico en detalles geométricos, materiales PBR y texturas procedurales 3D.
 
-SISTEMA DE COORDENADAS DEL ESTUDIO 3D:
-- El eje Y es la ALTURA VERTICAL (arriba/abajo). El pedestal del suelo está en y = 0.0.
-  * Base / ruedas / raíces / cimientos / pies: y entre 0.10 y 0.85
-  * Cuerpo central / chasis / tronco / fachada / cofre / torso: y entre 0.5 y 1.9
-  * Cima / tejado / copa de árbol / torreta / cabeza: y entre 1.6 y 2.9
-- El eje X es IZQUIERDA (-X) y DERECHA (+X), rango ideal entre -1.9 y +1.9.
-- El eje Z es PROFUNDIDAD: +Z mira hacia la cámara frontal, -Z es la parte trasera.
-- Las rotaciones (rx, ry, rz) están en radianes.
+=== LOS 7 PUNTOS COMPLETOS DE LA API BPY DEL MOTOR (ENTRENAMIENTO MAESTRO GEMINI) ===
 
-API BPY COMPLETA Y KIT DE HERRAMIENTAS PARA VIDEOJUEGOS SOPORTADAS POR EL MOTOR:
-1. Limpieza de escena:
-   - bpy.ops.object.select_all(action='SELECT')
-   - bpy.ops.object.delete()  # Úsalo al inicio SOLO si mode='replace'. NO lo uses si mode='append'.
+PUNTO 1. LIMPIEZA, COORDENADAS, PRIMITIVAS, GEOMETRÍA ORGÁNICA Y MACROS ('bpy.ops.mesh.*' & 'bpy.ops.curve.*'):
+- Limpieza inicial (solo si mode='replace'):
+  bpy.ops.object.select_all(action='SELECT')
+  bpy.ops.object.delete()
+- Coordenadas y Ejes: Respeta SIEMPRE y SIN MEZCLAR el Sistema de Ejes activo indicado en el prompt:
+  * Si el modo activo es BLENDER 5.2 Z-UP (# COORD_MODE: Z_UP): X = Izquierda(-)/Derecha(+), Y = Profundidad Frente(-)/Fondo(+), Z = ALTURA VERTICAL (Suelo en Z=0.0, Arriba es +Z). Todas las alturas van en Z: location=(x, y, z_altura).
+  * Si el modo activo es ESTUDIO 3D Y-UP (# COORD_MODE: Y_UP): X = Izquierda(-)/Derecha(+), Y = ALTURA VERTICAL (Suelo en Y=0.0, Arriba es +Y), Z = Profundidad Fondo(-)/Frente(+). Todas las alturas van en Y: location=(x, y_altura, z).
+  * NUNCA mezcles alturas en Y y alturas en Z dentro del mismo script. Comienza el script con el comentario # COORD_MODE: Z_UP o # COORD_MODE: Y_UP según el modo indicado.
+- Primitivas Clásicas (aceptan location=(x,y,z), rotation=(rx,ry,rz), scale=(sx,sy,sz), color=(r,g,b)):
+  * bpy.ops.mesh.primitive_cube_add(size=1.0, location=..., scale=..., color=...)
+  * bpy.ops.mesh.primitive_uv_sphere_add(radius=0.5, segments=24, ring_count=16, location=..., color=...)
+  * bpy.ops.mesh.primitive_ico_sphere_add(radius=0.6, subdivisions=2, location=..., color=...)
+  * bpy.ops.mesh.primitive_cylinder_add(radius=0.35, depth=1.0, vertices=24, location=..., color=...)
+  * bpy.ops.mesh.primitive_cone_add(radius1=0.35, radius2=0.0, depth=0.9, vertices=16, location=..., color=...)
+  * bpy.ops.mesh.primitive_torus_add(major_radius=1.0, minor_radius=0.08, location=..., color=...)
+  * bpy.ops.mesh.primitive_torus_knot_add(radius=0.65, tube=0.14, p=2, q=3, location=..., color=...)
+  * bpy.ops.mesh.primitive_plane_add(size=2.0) / primitive_grid_add(size=2.0, x_subdivisions=20, y_subdivisions=20)
+  * bpy.ops.mesh.primitive_circle_add(radius=1.0) / primitive_monkey_add(size=1.5)
+  * bpy.ops.curve.primitive_bezier_curve_add() / primitive_bezier_circle_add()
+- Herramientas de Geometría Orgánica, Chasis, Cristales y Hojas:
+  * bpy.ops.mesh.primitive_capsule_add(radius=0.25, length=0.75, location=..., rotation=..., scale=..., color=...)
+  * bpy.ops.mesh.primitive_octahedron_add(radius=0.42, detail=0, location=..., color=...)
+  * bpy.ops.mesh.primitive_dodecahedron_add(radius=0.48, detail=0, location=..., color=...)
+  * bpy.ops.mesh.primitive_horn_add(base_radius=0.20, tip_radius=0.02, length=1.05, bend=0.48, location=..., color=...)
+  * bpy.ops.mesh.primitive_blade_add(length=1.45, width=0.26, thickness=0.06, curve=0.12, location=..., color=...)
+  * bpy.ops.mesh.primitive_armor_plate_add(width=0.72, height=0.65, thickness=0.09, curvature=0.32, location=..., color=...)
+- Macro-Herramientas Universales 1-Línea:
+  * bpy.ops.mesh.primitive_prop_chest_add(width=1.15, height=0.82, depth=0.78, location=(0, 0.45, 0), color=..., accent_color=...)
+  * bpy.ops.mesh.primitive_wheel_pair_add(radius=0.36, width=0.22, span=0.88, y_pos=0.36, z_pos=0.65, color=..., rim_color=...)
+  * bpy.ops.mesh.primitive_tree_foliage_add(radius=0.95, layers=3, location=(0, 1.65, 0), color=..., accent_color=...)
+  * bpy.ops.mesh.primitive_arch_add(width=1.25, height=1.65, thickness=0.24, location=(0, 0.0, 0), rotation=(0,0,0), color=..., accent_color=...)
+  * bpy.ops.mesh.primitive_limb_pair_add(start_pos=(0.42, 1.58, 0.0), mid_pos=(0.78, 1.18, 0.14), end_pos=(0.70, 0.72, 0.36), thickness=0.15, joint_size=0.19, color=..., joint_color=...)
+  * bpy.ops.mesh.primitive_wing_pair_add(span=1.95, feathers=6, y_height=1.68, z_offset=-0.26, spread=0.92, color=..., accent_color=...)
 
-2. Primitivas 3D clásicas (todas aceptan location=(x, y, z), rotation=(rx, ry, rz), scale=(sx, sy, sz), color=(r, g, b) con valores float de 0.0 a 1.0):
-   - bpy.ops.mesh.primitive_ico_sphere_add(radius=0.6, subdivisions=2, location=(x, y, z), rotation=(rx, ry, rz), scale=(sx, sy, sz), color=(r, g, b))
-   - bpy.ops.mesh.primitive_uv_sphere_add(radius=0.5, segments=24, ring_count=16, location=(x, y, z), rotation=(rx, ry, rz), scale=(sx, sy, sz), color=(r, g, b))
-   - bpy.ops.mesh.primitive_cube_add(size=1.0, location=(x, y, z), rotation=(rx, ry, rz), scale=(sx, sy, sz), color=(r, g, b))
-   - bpy.ops.mesh.primitive_cylinder_add(radius=0.35, depth=1.0, vertices=20, location=(x, y, z), rotation=(rx, ry, rz), scale=(sx, sy, sz), color=(r, g, b))
-   - bpy.ops.mesh.primitive_cone_add(radius1=0.35, radius2=0.0, depth=0.9, vertices=16, location=(x, y, z), rotation=(rx, ry, rz), scale=(sx, sy, sz), color=(r, g, b))
-   - bpy.ops.mesh.primitive_torus_add(major_radius=1.0, minor_radius=0.07, location=(x, y, z), rotation=(rx, ry, rz), scale=(sx, sy, sz), color=(r, g, b))
-   - bpy.ops.mesh.primitive_torus_knot_add(radius=0.65, tube=0.14, p=2, q=3, location=(x, y, z), rotation=(rx, ry, rz), scale=(sx, sy, sz), color=(r, g, b))
+PUNTO 2. MALLAS 'from_pydata' Y TOPOLOGÍA DENSA 'bmesh' ('bmesh.ops.create_grid' & 'objects.link'):
+- Mallas por vértices y caras exactas ('from_pydata'):
+  mesh = bpy.data.meshes.new(name="MiMalla"); mesh.from_pydata(verts, edges, faces); mesh.update()
+  obj = bpy.data.objects.new("MiObjeto", mesh); bpy.context.collection.objects.link(obj)
+- Modelado topológico con 'bmesh' y 'bmesh.ops':
+  bm = bmesh.new() # o bm.from_mesh(mesh)
+  bmesh.ops.create_grid(bm, x_segments=40, y_segments=40, size=4.0) # o create_cube, create_uvsphere, create_icosphere, create_cone, create_cylinder
+  for v in bm.verts: v.co.z += 0.18 * math.sin(v.co.x * 2.0) * math.cos(v.co.y * 2.0)
+  for f in bm.faces: f.smooth = True
+  bmesh.ops.translate / scale / rotate / extrude_face_region / bevel / bisect_plane / recalc_face_normals
+  bm.to_mesh(mesh); bm.free()
 
-3. HERRAMIENTAS DE GEOMETRÍA ORGÁNICA, CHASIS, CRISTALES Y HOJAS:
-   - bpy.ops.mesh.primitive_capsule_add(radius=0.25, length=0.75, location=(x, y, z), rotation=(rx, ry, rz), scale=(sx, sy, sz), color=(r, g, b))  # Ideal para troncos, cilindros redondeados, tanques de combustible, cojines o extremidades
-   - bpy.ops.mesh.primitive_octahedron_add(radius=0.42, detail=0, location=(x, y, z), rotation=(rx, ry, rz), scale=(sx, sy, sz), color=(r, g, b))  # Ideal para gemas de botín (loot), cristales de maná, faroles y núcleos de energía
-   - bpy.ops.mesh.primitive_dodecahedron_add(radius=0.48, detail=0, location=(x, y, z), rotation=(rx, ry, rz), scale=(sx, sy, sz), color=(r, g, b))  # Ideal para rocas low-poly, islas flotantes, copas de árboles, meteoritos o cascos
-   - bpy.ops.mesh.primitive_horn_add(base_radius=0.20, tip_radius=0.02, length=1.05, bend=0.48, location=(x, y, z), rotation=(rx, ry, rz), scale=(sx, sy, sz), color=(r, g, b))  # Ideal para ramas curvas, raíces, tubos de escape, cuernos, colmillos o tentáculos
-   - bpy.ops.mesh.primitive_blade_add(length=1.45, width=0.26, thickness=0.06, curve=0.12, location=(x, y, z), rotation=(rx, ry, rz), scale=(sx, sy, sz), color=(r, g, b))  # Ideal para hojas de armas, alerones de vehículos, hélices, alas de nave o cuchillas
-   - bpy.ops.mesh.primitive_armor_plate_add(width=0.72, height=0.65, thickness=0.09, curvature=0.32, location=(x, y, z), rotation=(rx, ry, rz), scale=(sx, sy, sz), color=(r, g, b))  # Ideal para carrocerías curvas, tejados, escudos, tapas de cofres o armaduras
+PUNTO 3. BIBLIOTECA COMPLETA DE 38 TEXTURAS PBR 3D + RELIEVE BUMP (POR OBJETO O GLOBAL) Y ALIAS:
+- Asignación por material: mat.texture = 'stone_ashlar'; mat.texture_repeat = 2; mat.bump_strength = 1.2 (o bsdf.inputs["Texture"].default_value = '...')
+- Asignación por objeto o global: bpy.ops.material.set_texture(name='stone_ashlar', object=obj, repeat=2, bump=1.2, natural_color=True)
+- Las 38 Texturas PBR + Bump disponibles:
+  * Arquitectura y Piedra (11): 'stone_ashlar' (alias: 'piedra', 'silleria', 'caliza'), 'travertine_roman' ('travertino'), 'marble_carrara' ('marmol', 'carrara'), 'marble_nero' ('marmol_negro', 'marquina'), 'cobblestone' ('adoquin', 'empedrado'), 'brick_mudejar' ('ladrillo', 'mudejar'), 'terracotta_roof' ('teja', 'terracota'), 'slate_roof' ('pizarra'), 'andalusi_tiles' ('azulejo', 'ceramica'), 'stained_glass' ('vidriera', 'vitral'), 'concrete_brutalist' ('hormigon', 'cemento').
+  * Maderas y Naturaleza (10): 'wood_oak' ('madera', 'roble'), 'wood_mahogany' ('caoba', 'nogal'), 'tree_bark' ('corteza', 'tronco'), 'water_caustics' ('agua', 'mar'), 'ocean_deep' ('oceano', 'olas'), 'desert_sand' ('arena', 'dunas'), 'moss_nature' ('musgo', 'liquen'), 'grass_meadow' ('hierba', 'cesped'), 'ice_crystal' ('hielo', 'glaciar'), 'fresh_snow' ('nieve', 'escarcha').
+  * Metales, Tejidos y Cuero (8): 'brushed_metal' ('metal', 'acero', 'aluminio'), 'damascus_steel' ('damasco', 'forjado'), 'gold_damascene' ('oro', 'dorado', 'orfebreria'), 'copper_patina' ('bronce', 'cobre', 'patina'), 'carbon_weave' ('carbono', 'kevlar'), 'leather_tufted' ('cuero', 'piel'), 'royal_velvet' ('terciopelo', 'seda'), 'woven_linen' ('lino', 'tela', 'arpillera').
+  * Fantasía, Sci-Fi y Anime (8): 'dragon_scales' ('escamas'), 'biomech_plates' ('biomecanico'), 'magma_cracks' ('magma', 'lava'), 'solar_plasma' ('plasma', 'sol'), 'hologram_grid' ('holograma'), 'halftone_manga' ('manga', 'comic'), 'cyber_circuits' ('circuitos', 'cyber'), 'smooth_skin' ('cel', 'anime').
 
-4. MACRO-HERRAMIENTAS UNIVERSALES PARA ASSETS DE VIDEOJUEGOS (Construyen estructuras completas en 1 línea):
-   - bpy.ops.mesh.primitive_prop_chest_add(width=1.15, height=0.82, depth=0.78, location=(0, 0.45, 0), color=(r, g, b), accent_color=(r, g, b))
-     * Crea un cofre/contenedor completo con caja base, tapa abovedada, herrajes metálicos y cerradura frontal.
-   - bpy.ops.mesh.primitive_wheel_pair_add(radius=0.36, width=0.22, span=0.88, y_pos=0.36, z_pos=0.65, color=(r, g, b), rim_color=(r, g, b))
-     * Crea un eje completo con par de neumáticos izquierdo/derecho y llantas metálicas para coches, rovers, camiones, cañones o carruajes.
-   - bpy.ops.mesh.primitive_tree_foliage_add(radius=0.95, layers=3, location=(0, 1.65, 0), color=(r, g, b), accent_color=(r, g, b))
-     * Crea una copa frondosa de árbol o arbusto estilizado en capas orgánicas para naturaleza y escenarios.
-   - bpy.ops.mesh.primitive_arch_add(width=1.25, height=1.65, thickness=0.24, location=(0, 0.0, 0), rotation=(0, 0, 0), color=(r, g, b), accent_color=(r, g, b))
-     * Crea un arco arquitectónico completo con pilares, basas, capiteles y dovelas superiores para puertas, castillos, puentes, ruinas o portales.
-   - bpy.ops.mesh.primitive_limb_pair_add(start_pos=(0.42, 1.58, 0.0), mid_pos=(0.78, 1.18, 0.14), end_pos=(0.70, 0.72, 0.36), thickness=0.15, joint_size=0.19, color=(r, g, b), joint_color=(r, g, b))
-     * Crea un par simétrico de brazos, piernas o patas robóticas articuladas.
-   - bpy.ops.mesh.primitive_wing_pair_add(span=1.95, feathers=6, y_height=1.68, z_offset=-0.26, spread=0.92, color=(r, g, b), accent_color=(r, g, b))
-     * Crea un par de alas desplegadas en abanico para criaturas, naves o estatuas.
+PUNTO 4. MATERIALES PBR 'Principled BSDF' (Blender 5.2) Y NODOS CEL-SHADE / ANIME:
+- creación: mat = bpy.data.materials.new(name="Material"); mat.use_nodes = True; bsdf = mat.node_tree.nodes["Principled BSDF"]
+- Sockets soportados en bsdf.inputs[...].default_value:
+  * "Base Color": (R, G, B, 1.0) | "Metallic": 0.0..1.0 | "Roughness": 0.02..1.0
+  * "Coat Weight": 0.0..1.0 y "Coat Roughness": 0.02..0.5 (Barniz Clearcoat automotriz / lacado)
+  * "Anisotropic": 0.0..1.0 (Metales cepillados)
+  * "Transmission Weight": 0.0..0.95, "IOR": 1.45..2.4, "Alpha": 0.15..1.0 (Cristales, vidrieras, agua, gemas)
+  * "Emission Color": (R, G, B, 1.0) y "Emission Strength": 0.0..10.0
+  * "Bump Strength" / "Normal": 0.0..2.5 | "Texture": ID de cualquiera de las 38 texturas
+- Nodos procedurales y Cel-Shade: ShaderNodeShaderToRGB + ShaderNodeValToRGB (ColorRamp con interpolation='CONSTANT'), ShaderNodeBump, ShaderNodeTexNoise, ShaderNodeTexBrick, ShaderNodeTexWave, ShaderNodeTexChecker, ShaderNodeTexVoronoi.
 
-5. Modificadores globales, Corrección Espacial y Materiales (al final del script):
-   - bpy.ops.mesh.mirror_x()
-   - bpy.ops.mesh.taper(factor=0.22, axis='Y')
-   - bpy.ops.mesh.auto_ground()  # Ajusta automáticamente todo el asset para que repose exacto sobre el pedestal Y=0.02
-   - bpy.ops.mesh.smooth(iterations=3, factor=0.45)
-   - bpy.ops.material.set_texture(name='dragon_scales') # Valores: 'dragon_scales', 'biomech_plates', 'magma_cracks', 'halftone_manga', 'cyber_circuits', 'smooth_skin'
+PUNTO 5. MOTORES DE RENDER ('CYCLES' / 'EEVEE' / 'CEL' / 'MATCAP'), ILUMINACIÓN 3 PUNTOS, CONTORNOS, SSAO Y CÁMARA/ZOOM:
+- Selección de motor: bpy.context.scene.render.engine = 'CYCLES' # Opciones: 'CYCLES', 'BLENDER_EEVEE_NEXT', 'EEVEE', 'CEL', 'MATCAP', 'NORMALS', 'ORIGINAL'
+- Parámetros físicos Cycles:
+  bpy.context.scene.cycles.samples = 128 # 16..256
+  bpy.context.scene.cycles.clearcoat = 0.65
+  bpy.context.scene.cycles.roughness_factor = 0.85
+  bpy.context.scene.cycles.ior = 1.52
+  bpy.context.scene.cycles.gi_bounce = 1.45
+- Parámetros EEVEE Next:
+  bpy.context.scene.eevee.bloom_intensity = 0.45
+  bpy.context.scene.eevee.env_intensity = 1.35
+- Operadores de Iluminación, Contornos, SSAO, Normales y Cámara:
+  bpy.ops.render.set_lighting(intensity=3.4, angle=42, headlight=True)
+  bpy.ops.render.set_outline(thickness=0.015, opacity=0.90)
+  bpy.ops.render.set_ssao(intensity=1.2)
+  bpy.ops.render.set_normal_smoothing(factor=0.92)
+  bpy.ops.render.set_viewport(bg_color='#182030', pedestal=True, auto_rotate=False, auto_rotate_speed=1.8)
+  bpy.ops.view3d.camera_preset(view='hero', zoom=115) # Vistas: 'hero', 'front', 'closeup', 'macro', 'side', 'top'
+  bpy.ops.view3d.set_zoom(percent=135)
+  bpy.ops.view3d.frame_all(margin=1.15)
+
+PUNTO 6. MODIFICADORES NO DESTRUCTIVOS ('BEVEL', 'SUBSURF', 'SOLIDIFY', 'ARRAY', 'MIRROR') Y EDICIÓN DE TRIÁNGULOS:
+- Modificadores por objeto (mod = obj.modifiers.new(name="...", type='...')):
+  * 'BEVEL': mod.width = 0.02; mod.segments = 2 (Biselado realista que atrapa la luz en bordes)
+  * 'SUBSURF': mod.levels = 2 (Subdivisión orgánica suave)
+  * 'SOLIDIFY': mod.thickness = 0.04; mod.use_flip_normals = False (Grosor real o negativo + flip_normals para Outline Anime)
+  * 'ARRAY': mod.count = 6; mod.relative_offset_displace = (1.2, 0.0, 0.0) (Clonación matemática de arcos, columnas, radios)
+  * 'MIRROR': mod.use_axis = (True, False, False); mod.mirror_object = ref_obj (Simetría bilateral exacta)
+- Operadores de Triángulos y Malla:
+  * bpy.ops.mesh.subdivide_triangles(segments=2, object=obj) # Divide cada triángulo en 4 (segments=2), 9 (3) o 16 (4)
+  * bpy.ops.mesh.paint_triangles(color=(0.2, 0.7, 1.0), object=obj)
+  * bpy.ops.mesh.mirror_x() | bpy.ops.mesh.taper(factor=0.22, axis='Y') | bpy.ops.mesh.smooth(iterations=3, factor=0.45) | bpy.ops.mesh.auto_ground()
+
+PUNTO 7. ANIMACIÓN EN VIVO A 60 FPS ('bpy.anim.*'), ÁLGEBRA 'mathutils' Y SINTAXIS PYTHON AVANZADA:
+- Animación continua en el visor WebGL:
+  * bpy.anim.water(obj, speed=2.2, amplitude=0.12, frequency=2.5) # Olas y cáusticas animadas en tiempo real
+  * bpy.anim.loop(obj, type='TURNTABLE', speed=1.0, amplitude=0.15, axis='Y') # Tipos: 'TURNTABLE', 'HOVER', 'PULSE', 'PENDULUM'
+- Álgebra y Sintaxis: mathutils.Vector, Euler, Matrix, Quaternion, operador @ (Matrix @ Vector), numpy as np, comprensiones de listas/dicts, slicing arr[::-1], f-strings y clases bpy.types.Operator.
 
 REGLAS IMPORTANTES:
-- Adapta SIEMPRE la geometría exactamente al tipo de elemento pedido por el usuario: si pide un coche, barco, casa, árbol, cofre, silla, poción, espada o comida, construye ESE objeto específico (NO construyas un guerrero salvo que el usuario pida un personaje/guerrero).
-- Escribe cada llamada bpy.ops.mesh.* en UNA SOLA LÍNEA completa y cierra siempre con bpy.ops.mesh.auto_ground() y un print("...") descriptivo en español.`;
+- Adapta SIEMPRE la geometría, los materiales PBR y las 38 texturas exactamente al elemento pedido por el usuario.
+- Cierra siempre con bpy.ops.mesh.auto_ground() y un print("...") descriptivo en español.`;
 
 interface GeminiBpyHelpers {
   archetype?: string;
@@ -86,9 +141,14 @@ interface GeminiBpyHelpers {
   autoTexture?: string;
   aiTools?: string[];
   autoCritique?: boolean;
+  coordinateMode?: 'auto' | 'blender_z_up' | 'studio_y_up';
   sceneBounds?: {
+    minX?: number;
+    maxX?: number;
     minY: number;
     maxY: number;
+    minZ?: number;
+    maxZ?: number;
     widthX: number;
     depthZ: number;
     meshCount: number;
@@ -97,19 +157,51 @@ interface GeminiBpyHelpers {
 
 const AI_TOOL_INSTRUCTIONS: Record<string, string> = {
   use_world_props:
-    '- HERRAMIENTA ACTIVA [Props, Vehículos, Árboles y Arquitectura]: Si el usuario pide cofres/cajas usa `bpy.ops.mesh.primitive_prop_chest_add(...)`; si pide vehículos/coches/rovers/carros usa `bpy.ops.mesh.primitive_wheel_pair_add(...)`; si pide árboles/bosques/plantas usa `bpy.ops.mesh.primitive_tree_foliage_add(...)`; si pide edificios/puertas/puentes/portales usa `bpy.ops.mesh.primitive_arch_add(...)`.',
+    '- TAG ACTIVO [Props, Vehículos, Árboles y Arquitectura]: Usa `primitive_prop_chest_add`, `primitive_wheel_pair_add`, `primitive_tree_foliage_add` o `primitive_arch_add` según el objeto.',
   use_limbs:
-    '- HERRAMIENTA ACTIVA [Extremidades Articuladas & Cápsulas]: Usa `bpy.ops.mesh.primitive_limb_pair_add(...)` para brazos/patas articuladas y `bpy.ops.mesh.primitive_capsule_add(...)` para cilindros redondeados, troncos o segmentos.',
+    '- TAG ACTIVO [Extremidades Articuladas & Cápsulas]: Usa `primitive_limb_pair_add` para brazos/patas articuladas y `primitive_capsule_add` para segmentos redondeados.',
   use_horns_blades:
-    '- HERRAMIENTA ACTIVA [Hojas Biseladas & Formas Curvas]: Usa `bpy.ops.mesh.primitive_horn_add(...)` para ramas curvas, raíces, tubos de escape o cuernos, y `bpy.ops.mesh.primitive_blade_add(...)` para hojas de armas, alerones, hélices o cuchillas.',
+    '- TAG ACTIVO [Hojas Biseladas & Formas Curvas]: Usa `primitive_horn_add` para ramas curvas, cuernos o escapes, y `primitive_blade_add` para hojas, alerones o hélices.',
   use_armor_plates:
-    '- HERRAMIENTA ACTIVA [Placas Curvas & Cristales]: Usa `bpy.ops.mesh.primitive_armor_plate_add(...)` para carrocerías, tejados curvos, escudos o blindajes, y `bpy.ops.mesh.primitive_octahedron_add(...)` para gemas, faros o cristales.',
+    '- TAG ACTIVO [Placas Curvas & Cristales]: Usa `primitive_armor_plate_add` para carrocerías, tejados curvos, escudos o blindajes, y `primitive_octahedron_add` para gemas o faros.',
   use_wings:
-    '- HERRAMIENTA ACTIVA [Alas / Paneles en Abanico]: Usa `bpy.ops.mesh.primitive_wing_pair_add(...)` cuando el modelo requiera alas, velas o paneles desplegados.',
+    '- TAG ACTIVO [Alas / Paneles en Abanico]: Usa `primitive_wing_pair_add` cuando el modelo requiera alas, velas o paneles desplegados.',
+  use_bmesh_grid:
+    '- TAG ACTIVO [Topología BMesh Densa (create_grid)]: Usa `bm = bmesh.new(); bmesh.ops.create_grid(bm, x_segments=36, y_segments=36, size=4.0)` con ondas trigonométricas `math.sin/cos` y `bm.to_mesh(mesh)` para terrenos, bóvedas, olas o superficies orgánicas.',
+  use_from_pydata:
+    '- TAG ACTIVO [Polígonos Exactos (from_pydata)]: Construye partes arquitectónicas o perfiles a medida usando `mesh.from_pydata(verts, [], faces)` y `bpy.context.collection.objects.link(obj)`.',
+  use_mod_bevel:
+    '- TAG ACTIVO [Modificador BEVEL (Bordes Biselados Realistas)]: Aplica `mod = obj.modifiers.new(name="Bisel", type="BEVEL"); mod.width = 0.02; mod.segments = 2` en bloques, carrocerías y muros para capturar brillos especulares en los bordes.',
+  use_mod_subsurf:
+    '- TAG ACTIVO [Modificador SUBSURF (Subdivisión Suave)]: Aplica `mod = obj.modifiers.new(name="Subsurf", type="SUBSURF"); mod.levels = 2` en formas orgánicas, cúpulas o neumáticos.',
+  use_mod_array_mirror:
+    '- TAG ACTIVO [Modificadores ARRAY y MIRROR]: Usa `obj.modifiers.new(name="Array", type="ARRAY")` para repetir arcos/columnas/radios y `obj.modifiers.new(name="Mirror", type="MIRROR")` para simetría matemática.',
+  use_mod_solidify_outline:
+    '- TAG ACTIVO [Modificador SOLIDIFY + Outline Anime]: Usa `mod = obj.modifiers.new(name="Solidify", type="SOLIDIFY"); mod.thickness = 0.04` para dar grosor a cristales/telas o con `mod.use_flip_normals = True` para contornos.',
+  use_pbr_clearcoat:
+    '- TAG ACTIVO [Material PBR Clearcoat & Anisotropía (Blender 5.2)]: Configura `bsdf.inputs["Coat Weight"].default_value = 1.0`, `bsdf.inputs["Coat Roughness"].default_value = 0.04` y `bsdf.inputs["Anisotropic"].default_value = 0.6` en materiales metálicos, cerámicos o carrocerías.',
+  use_pbr_glass_transmission:
+    '- TAG ACTIVO [Cristal Real, Vidriera & Transmisión IOR]: Configura `bsdf.inputs["Transmission Weight"].default_value = 0.88`, `bsdf.inputs["IOR"].default_value = 1.52` y `bsdf.inputs["Roughness"].default_value = 0.05` para ventanas, vidrieras, faros, agua o gemas.',
+  use_procedural_textures_per_obj:
+    '- TAG ACTIVO [38 Texturas PBR + Bump 3D por Pieza]: Asigna texturas distintas a cada parte del modelo con `mat.texture = "..."` o `bpy.ops.material.set_texture(name="...", object=obj, repeat=2, bump=1.2)` (ej. `stone_ashlar`, `marble_carrara`, `brick_mudejar`, `terracotta_roof`, `wood_oak`, `gold_damascene`, `water_caustics`).',
+  use_cel_shader_to_rgb:
+    '- TAG ACTIVO [Nodos Anime ShaderToRGB + ColorRamp]: Añade nodos `ShaderNodeShaderToRGB` y `ShaderNodeValToRGB` con `interpolation = "CONSTANT"` y activa `bpy.ops.render.set_outline(thickness=0.018, opacity=0.95)`.',
+  use_engine_cycles:
+    '- TAG ACTIVO [Motor Físico CYCLES]: Al final del script activa `bpy.context.scene.render.engine = "CYCLES"`, `bpy.context.scene.cycles.samples = 128`, `bpy.context.scene.cycles.clearcoat = 0.70` y `bpy.context.scene.cycles.gi_bounce = 1.45`.',
+  use_engine_eevee:
+    '- TAG ACTIVO [Motor Tiempo Real EEVEE Next]: Al final del script activa `bpy.context.scene.render.engine = "BLENDER_EEVEE_NEXT"`, `bpy.context.scene.eevee.bloom_intensity = 0.48` y `bpy.context.scene.eevee.env_intensity = 1.35`.',
+  use_three_point_lighting:
+    '- TAG ACTIVO [Iluminación Estudio 3 Puntos + SSAO]: Configura `bpy.ops.render.set_lighting(intensity=3.4, angle=42, headlight=True)` y `bpy.ops.render.set_ssao(intensity=1.25)`.',
+  use_camera_framing:
+    '- TAG ACTIVO [Encuadre Cámara Hero + Zoom]: Ajusta la cámara al final con `bpy.ops.view3d.camera_preset(view="hero", zoom=115)` y `bpy.ops.view3d.frame_all(margin=1.15)`.',
+  use_tri_subdivide_paint:
+    '- TAG ACTIVO [Subdivisión y Pintura de Triángulos]: Usa `bpy.ops.mesh.subdivide_triangles(segments=2, object=obj)` en mallas clave que requieran mayor densidad de triángulos.',
+  use_live_animation:
+    '- TAG ACTIVO [Animación en Vivo 60 FPS]: Añade movimiento en vivo con `bpy.anim.water(obj, speed=2.0, amplitude=0.10)` para agua o `bpy.anim.loop(obj, type="TURNTABLE", speed=0.8)` / `type="HOVER"` para elementos dinámicos.',
   auto_mirror:
-    '- HERRAMIENTA ACTIVA [Simetría Espejo Automática]: Asegura simetría bilateral o incluye `bpy.ops.mesh.mirror_x()` antes del final del script.',
+    '- TAG ACTIVO [Simetría Espejo Automática]: Asegura simetría bilateral o incluye `bpy.ops.mesh.mirror_x()` antes del final del script.',
   auto_ground:
-    '- HERRAMIENTA ACTIVA [Auto-Apoyo en Pedestal]: Incluye `bpy.ops.mesh.auto_ground()` al final del script para asentar el modelo exactamente sobre Y=0.02.',
+    '- TAG ACTIVO [Auto-Apoyo en Pedestal]: Incluye `bpy.ops.mesh.auto_ground()` al final del script para asentar el modelo exactamente sobre Y=0.02.',
 };
 
 const ARCHETYPE_GUIDES: Record<string, string> = {
@@ -296,8 +388,48 @@ async function startServer() {
 4. Cierra el script con \`bpy.ops.mesh.auto_ground()\` para que el modelo descanse perfecto sobre el pedestal.`
         : '';
 
-      const boundsInfo = helpers?.sceneBounds
-        ? `\nDIMENSIONES DEL MODELO ACTUAL EN ESCENA: Altura Y desde ${helpers.sceneBounds.minY.toFixed(2)} hasta ${helpers.sceneBounds.maxY.toFixed(2)}, Ancho X=${helpers.sceneBounds.widthX.toFixed(2)}, Profundidad Z=${helpers.sceneBounds.depthZ.toFixed(2)} (${helpers.sceneBounds.meshCount} mallas activas). Usa estas coordenadas para encajar accesorios con precisión.`
+      // Determinar el sistema de ejes efectivo para evitar que Gemini mezcle Y-Up con Z-Up
+      const rawCoordMode = helpers?.coordinateMode || 'auto';
+      const codeLooksZUp =
+        currentCode.includes('# COORD_MODE: Z_UP') ||
+        currentCode.includes('bmesh.ops.create_grid') ||
+        currentCode.includes('v.co.z') ||
+        (!currentCode.includes('# COORD_MODE: Y_UP') && rawCoordMode === 'blender_z_up');
+      const effectiveIsZUp =
+        rawCoordMode === 'blender_z_up' || (rawCoordMode === 'auto' && codeLooksZUp);
+
+      const coordSystemDirective = effectiveIsZUp
+        ? `\nSISTEMA DE EJES OBLIGATORIO ACTIVO: BLENDER 5.2 ESTÁNDAR (Z-UP / EJE Z ARRIBA).
+- Primera línea obligatoria del script: # COORD_MODE: Z_UP
+- Eje X: Izquierda (-X) a Derecha (+X). Centro en X = 0.0.
+- Eje Y: Profundidad Frente (-Y) a Fondo (+Y). Centro en Y = 0.0.
+- Eje Z: ALTURA VERTICAL. El suelo del pedestal está en Z = 0.00 y hacia arriba es +Z.
+- REGLA CRÍTICA DE POSICIONAMIENTO: En \`location=(x, y, z)\`, la ALTURA siempre es el 3er valor \`z\`. Un objeto de altura H apoyado en el suelo tiene su centro en \`z = H / 2\`. PROHIBIDO poner alturas verticales en el eje Y.`
+        : `\nSISTEMA DE EJES OBLIGATORIO ACTIVO: ESTUDIO 3D WEBGL (Y-UP / EJE Y ARRIBA).
+- Primera línea obligatoria del script: # COORD_MODE: Y_UP
+- Eje X: Izquierda (-X) a Derecha (+X). Centro en X = 0.0.
+- Eje Y: ALTURA VERTICAL. El suelo del pedestal está en Y = 0.00 y hacia arriba es +Y.
+- Eje Z: Profundidad Fondo (-Z) a Frente (+Z). Centro en Z = 0.0.
+- REGLA CRÍTICA DE POSICIONAMIENTO: En \`location=(x, y, z)\`, la ALTURA siempre es el 2º valor \`y\`. Un objeto de altura H apoyado en el suelo tiene su centro en \`y = H / 2\`. PROHIBIDO poner alturas verticales en el eje Z.`;
+
+      const sb = helpers?.sceneBounds;
+      const minXVal = sb?.minX ?? -(sb?.widthX ?? 0) / 2;
+      const maxXVal = sb?.maxX ?? (sb?.widthX ?? 0) / 2;
+      const minZVal = sb?.minZ ?? -(sb?.depthZ ?? 0) / 2;
+      const maxZVal = sb?.maxZ ?? (sb?.depthZ ?? 0) / 2;
+
+      const boundsInfo = sb
+        ? effectiveIsZUp
+          ? `\nBOUNDING BOX EXACTO DEL MODELO ACTUAL EN COORDENADAS BLENDER Z-UP (Suelo Z=0.00):
+- Eje X (Izquierda/Derecha): desde X=${minXVal.toFixed(2)} hasta X=${maxXVal.toFixed(2)} (Ancho=${sb.widthX.toFixed(2)})
+- Eje Y (Profundidad Frente/Fondo): desde Y=${(-maxZVal).toFixed(2)} hasta Y=${(-minZVal).toFixed(2)} (Profundidad=${sb.depthZ.toFixed(2)})
+- Eje Z (ALTURA VERTICAL): base en Z=${sb.minY.toFixed(2)}, cima en Z=${sb.maxY.toFixed(2)} (${sb.meshCount} mallas activas).
+Usa exactamente estos rangos (X, Y, Z) para colocar nuevos puntos o piezas sin desfase.`
+          : `\nBOUNDING BOX EXACTO DEL MODELO ACTUAL EN COORDENADAS ESTUDIO Y-UP (Suelo Y=0.00):
+- Eje X (Izquierda/Derecha): desde X=${minXVal.toFixed(2)} hasta X=${maxXVal.toFixed(2)} (Ancho=${sb.widthX.toFixed(2)})
+- Eje Y (ALTURA VERTICAL): base en Y=${sb.minY.toFixed(2)}, cima en Y=${sb.maxY.toFixed(2)}
+- Eje Z (Profundidad Atrás/Frente): desde Z=${minZVal.toFixed(2)} hasta Z=${maxZVal.toFixed(2)} (Profundidad=${sb.depthZ.toFixed(2)}, ${sb.meshCount} mallas activas).
+Usa exactamente estos rangos (X, Y, Z) para colocar nuevos puntos o piezas sin desfase.`
         : '';
 
       const contextSnippet = currentCode
@@ -306,6 +438,7 @@ async function startServer() {
 
       const fullTextPrompt = [
         modeInstruction,
+        coordSystemDirective,
         `NIVEL DE RAZONAMIENTO SOLICITADO: ${effectiveThinkingKey} (${userEmail ? `Cuenta Google: ${userEmail}` : 'Sesión Estándar'}).`,
         archetypeText ? `\nGUÍA DE ARQUETIPO:\n${archetypeText}` : '',
         symmetryText ? `\nGUÍA DE SIMETRÍA:\n${symmetryText}` : '',
@@ -321,7 +454,7 @@ async function startServer() {
         boundsInfo,
         `\nPETICIÓN DEL USUARIO: "${prompt.trim()}"`,
         contextSnippet,
-        '\nGenera el script Python (bpy) completo y detalla en "thoughtEvolution" los 4 a 6 pasos clave de tu evolución de pensamiento (análisis morfológico, herramientas avanzadas utilizadas, cálculo espacial Y/X/Z y acabado de materiales).',
+        `\nGenera el script Python (bpy) completo respetando estrictamente el modo ${effectiveIsZUp ? 'Z-UP (# COORD_MODE: Z_UP)' : 'Y-UP (# COORD_MODE: Y_UP)'} y detalla en "thoughtEvolution" los 4 a 6 pasos clave de tu evolución de pensamiento.`,
       ]
         .filter(Boolean)
         .join('\n');
@@ -817,6 +950,11 @@ async function startServer() {
 
       const usage = response.usageMetadata;
 
+      const coordHeader = effectiveIsZUp ? '# COORD_MODE: Z_UP' : '# COORD_MODE: Y_UP';
+      const normalizedPythonCode = parsed.pythonCode.includes('# COORD_MODE:')
+        ? parsed.pythonCode
+        : `${coordHeader}\n${parsed.pythonCode}`;
+
       res.json({
         title: parsed.title || 'Modelo Generado con Gemini',
         summary: parsed.summary || 'Geometría 3D generada proceduralmente mediante bpy.',
@@ -825,11 +963,11 @@ async function startServer() {
             ? parsed.thoughtEvolution
             : [
                 'Analizando proporciones espaciales y silueta principal del modelo 3D.',
-                'Calculando coordenadas de simetría en ejes X, Y, Z sobre el pedestal.',
+                `Calculando coordenadas exactas en sistema ${effectiveIsZUp ? 'Blender 5.2 Z-Up (Z=Altura)' : 'Estudio WebGL Y-Up (Y=Altura)'} sobre el pedestal.`,
                 'Construyendo primitivas bpy y bucles trigonométricos para articulaciones y detalles.',
                 'Aplicando paleta de colores contrastada para sombreado Cel-Shading de 3 tonos.',
               ],
-        pythonCode: parsed.pythonCode,
+        pythonCode: normalizedPythonCode,
         modelUsed: finalModelUsed,
         requestedModel,
         fallbackNotice,

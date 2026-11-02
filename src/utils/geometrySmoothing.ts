@@ -51,12 +51,18 @@ export function createThreeToneGradientTexture(): THREE.DataTexture {
  */
 export function prepareGeometryNormals(mesh: THREE.Mesh): void {
   const geometry = mesh.geometry as THREE.BufferGeometry;
+  if (!geometry || !geometry.attributes || !geometry.attributes.position || geometry.attributes.position.count === 0) {
+    return;
+  }
 
   const nonIndexedGeo = geometry.index ? geometry.toNonIndexed() : geometry.clone();
   nonIndexedGeo.computeVertexNormals(); // Normales planas por cara (muestran los polígonos)
 
   const posAttr = nonIndexedGeo.attributes.position as THREE.BufferAttribute;
   const flatNormAttr = nonIndexedGeo.attributes.normal as THREE.BufferAttribute;
+  if (!posAttr || !flatNormAttr || posAttr.count === 0) {
+    return;
+  }
   const vertexCount = posAttr.count;
 
   const flatNormals = new Float32Array(flatNormAttr.array);
@@ -137,6 +143,41 @@ export function prepareGeometryNormals(mesh: THREE.Mesh): void {
     sphericalNormals[i * 3 + 2] = _tempVecB.z;
   }
 
+  // Si la geometría no dispone de coordenadas UV (ej. mallas creadas con bmesh.ops.create_grid o from_pydata),
+  // generar proyección UV triplanar/box automática según la normal dominante de cada cara
+  // para que las texturas procedurales (piedra, madera, agua, etc.) y sus mapas de relieve se proyecten sin distorsión.
+  if (!nonIndexedGeo.attributes.uv) {
+    const uvs = new Float32Array(vertexCount * 2);
+    const bbox = nonIndexedGeo.boundingBox;
+    const spanX = bbox ? Math.max(0.001, bbox.max.x - bbox.min.x) : 1;
+    const spanY = bbox ? Math.max(0.001, bbox.max.y - bbox.min.y) : 1;
+    const spanZ = bbox ? Math.max(0.001, bbox.max.z - bbox.min.z) : 1;
+    const minX = bbox ? bbox.min.x : 0;
+    const minY = bbox ? bbox.min.y : 0;
+    const minZ = bbox ? bbox.min.z : 0;
+
+    for (let i = 0; i < vertexCount; i++) {
+      const vx = posAttr.getX(i);
+      const vy = posAttr.getY(i);
+      const vz = posAttr.getZ(i);
+      const nx = Math.abs(flatNormals[i * 3]);
+      const ny = Math.abs(flatNormals[i * 3 + 1]);
+      const nz = Math.abs(flatNormals[i * 3 + 2]);
+
+      if (ny >= nx && ny >= nz) {
+        uvs[i * 2] = (vx - minX) / spanX;
+        uvs[i * 2 + 1] = (vz - minZ) / spanZ;
+      } else if (nx >= ny && nx >= nz) {
+        uvs[i * 2] = (vz - minZ) / spanZ;
+        uvs[i * 2 + 1] = (vy - minY) / spanY;
+      } else {
+        uvs[i * 2] = (vx - minX) / spanX;
+        uvs[i * 2 + 1] = (vy - minY) / spanY;
+      }
+    }
+    nonIndexedGeo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+  }
+
   // Atributo personalizado `aSmoothNormal` para el Inverted Hull Outline Shader
   nonIndexedGeo.setAttribute(
     'aSmoothNormal',
@@ -175,11 +216,12 @@ export function applyNormalSmoothingToModel(
         sphericalNormals: Float32Array;
       } | undefined;
 
-      if (!data) return;
+      if (!data || !mesh.geometry || !mesh.geometry.attributes) return;
 
-      const normalAttr = mesh.geometry.attributes.normal as THREE.BufferAttribute;
+      const normalAttr = mesh.geometry.attributes.normal as THREE.BufferAttribute | undefined;
+      if (!normalAttr || !normalAttr.array || normalAttr.count === 0) return;
       const arr = normalAttr.array as Float32Array;
-      const count = normalAttr.count;
+      const count = Math.min(normalAttr.count, Math.floor(data.flatNormals.length / 3));
 
       for (let i = 0; i < count; i++) {
         const idx = i * 3;
@@ -324,7 +366,7 @@ export function setupStylizedEnemyModel(
     vertexCount += posAttr.count;
     triangleCount += Math.floor(posAttr.count / 3);
 
-    // 3. Crear materiales (Cel-Shading 3 tonos, MatCap Escultura, Normal Debug y Original PBR)
+    // 3. Crear materiales (Cel-Shading 3 tonos, EEVEE Realtime PBR, Cycles Physical Raytrace, MatCap Escultura, Normal Debug y Original)
     const origMat = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
     const stdMat = origMat as THREE.MeshStandardMaterial;
 
@@ -333,15 +375,55 @@ export function setupStylizedEnemyModel(
     const emissiveColor = stdMat?.emissive ? stdMat.emissive.clone() : new THREE.Color(0x000000);
     const emissiveMap = stdMat?.emissiveMap || null;
     const emissiveIntensity = stdMat?.emissiveIntensity ?? 1.0;
+    const baseRoughness = stdMat?.roughness !== undefined ? stdMat.roughness : 0.36;
+    const baseMetalness = stdMat?.metalness !== undefined ? stdMat.metalness : 0.24;
 
     mesh.userData.originalMap = baseMap;
     mesh.userData.originalColorHex = `#${baseColor.getHexString()}`;
+    mesh.userData.baseRoughness = baseRoughness;
+    mesh.userData.baseMetalness = baseMetalness;
+    mesh.userData.baseClearcoat = (stdMat as THREE.MeshPhysicalMaterial)?.clearcoat ?? 0;
+    mesh.userData.baseIor = (stdMat as THREE.MeshPhysicalMaterial)?.ior ?? 1.5;
 
     const toonMaterial = new THREE.MeshToonMaterial({
       color: baseColor,
       map: baseMap,
       gradientMap: gradientTexture,
       emissive: emissiveColor,
+      emissiveMap: emissiveMap,
+      emissiveIntensity: emissiveIntensity,
+    });
+
+    const eeveeMaterial = new THREE.MeshPhysicalMaterial({
+      color: baseColor.clone(),
+      map: baseMap,
+      roughness: Math.max(0.04, baseRoughness * 0.92),
+      metalness: baseMetalness,
+      clearcoat: (stdMat as THREE.MeshPhysicalMaterial)?.clearcoat ?? 0.15,
+      clearcoatRoughness: 0.12,
+      ior: 1.45,
+      reflectivity: 0.75,
+      envMapIntensity: 1.55,
+      emissive: emissiveColor.clone(),
+      emissiveMap: emissiveMap,
+      emissiveIntensity: emissiveIntensity,
+    });
+
+    const cyclesMaterial = new THREE.MeshPhysicalMaterial({
+      color: baseColor.clone(),
+      map: baseMap,
+      roughness: Math.max(0.03, baseRoughness * 0.75),
+      metalness: Math.min(1.0, baseMetalness + 0.06),
+      clearcoat: Math.max(0, (1.0 - baseRoughness * 0.7) * 0.55),
+      clearcoatRoughness: 0.06,
+      ior: 1.5,
+      reflectivity: 0.95,
+      specularIntensity: 1.0,
+      sheen: 0.28,
+      sheenRoughness: 0.32,
+      sheenColor: baseColor.clone().lerp(new THREE.Color(0xffffff), 0.5),
+      envMapIntensity: 1.95,
+      emissive: emissiveColor.clone(),
       emissiveMap: emissiveMap,
       emissiveIntensity: emissiveIntensity,
     });
@@ -357,6 +439,8 @@ export function setupStylizedEnemyModel(
 
     mesh.userData.originalMaterial = mesh.material;
     mesh.userData.toonMaterial = toonMaterial;
+    mesh.userData.eeveeMaterial = eeveeMaterial;
+    mesh.userData.cyclesMaterial = cyclesMaterial;
     mesh.userData.matcapMaterial = matcapMaterial;
     mesh.userData.normalDebugMaterial = normalDebugMaterial;
     mesh.material = toonMaterial;

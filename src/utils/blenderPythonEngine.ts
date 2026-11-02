@@ -1,13 +1,24 @@
 import * as THREE from 'three';
-import { applyGlobalLaplacianSmoothing, decimateModelGeometry } from './meshDeformer';
-import { generateProceduralTexture, TexturePatternType } from './proceduralTextures';
+import {
+  applyGlobalLaplacianSmoothing,
+  decimateModelGeometry,
+  segmentAllModelTriangles,
+  TriangleSubdivideMode,
+} from './meshDeformer';
+import {
+  generateProceduralTexture,
+  generateProceduralBumpTexture,
+  getTexturePresetInfo,
+  resolveTexturePatternId,
+  TexturePatternType,
+} from './proceduralTextures';
 import {
   prepareGeometryNormals,
   applyNormalSmoothingToModel,
   createComicOutlineMaterial,
   createThreeToneGradientTexture,
 } from './geometrySmoothing';
-import { getProceduralMatcapTexture } from './matcapGenerator';
+import { getProceduralMatcapTexture, MatcapPresetId } from './matcapGenerator';
 import { addBlenderLoop, setBlenderWater, startBlenderRun, finalizeBlenderRun } from './blenderAnimation';
 
 // PURGA DEFENSIVA INMEDIATA: NUNCA extender Object.prototype (propiedades como 'get' o 'value'
@@ -40,6 +51,9 @@ export interface ScriptExecutionResult {
   objectsCreated?: number;
   coordinateModeUsed?: 'blender_z_up' | 'studio_y_up';
   error?: string;
+  errorLine?: number;
+  errorSourceCode?: string;
+  errorReason?: string;
 }
 
 export interface BlenderScriptPreset {
@@ -54,6 +68,523 @@ export const BLENDER_SCRIPT_PRESETS: BlenderScriptPreset[] = [
   // ============================================================================
   // CATEGORÍA 1: GENERACIÓN PROCEDURAL DE NUEVOS OBJETOS 3D DESDE CERO EN PYTHON
   // ============================================================================
+  {
+    id: 'gen_catedral_sevilla',
+    name: 'Catedral de Sevilla & La Giralda (Monumental)',
+    category: 'generate',
+    description: 'Catedral de Santa María de la Sede de Sevilla completa: 5 naves escalonadas, doble batería de arbotantes y pináculos, Cimborrio, La Giralda con paños de sebka y Giraldillo, Patio de los Naranjos con fuente animada, Capilla Real e interior con Coro, Órganos y Retablo Mayor',
+    code: `import bpy
+import math
+
+# ==============================================================================
+# CATEDRAL DE SANTA MARÍA DE LA SEDE DE SEVILLA & LA GIRALDA (MONUMENTAL)
+# ==============================================================================
+# Incluye:
+# - Planta de salón de 5 naves + 2 naves de capillas perimetrales
+# - Crucero con Cimborrio octogonal y linterna
+# - Doble hilera de Arbotantes góticos, contrafuertes, cresterías y pináculos
+# - La Giralda (Caña almohade con paños de sebka, balcones, Cuerpo de Campanas
+#   renacentista de Hernán Ruiz, terraza de azucenas y estatua del Giraldillo)
+# - Patio de los Naranjos (Claustro norte, Puerta del Perdón con almenas
+#   escalonadas, 24 naranjos con frutos, alcorques y fuente mudéjar animada)
+# - Capilla Real renacentista en la cabecera oriental con gran cúpula y linterna
+# - Fachada Occidental (Puerta de la Asunción, Bautismo y San Miguel + Rosetón)
+# - Interior transitable: Pilares fasciculados, Coro con sillería y 2 Órganos
+#   monumentales, Capilla Mayor con Retablo Mayor de oro y Reja renacentista
+# ==============================================================================
+
+bpy.ops.object.select_all(action='SELECT')
+bpy.ops.object.delete(use_global=False)
+
+# ==========================================
+# 1. SISTEMA DE MATERIALES PBR
+# ==========================================
+def material(nombre, color, rugosidad=0.8, metalico=0.0, emision=0.0):
+    mat = bpy.data.materials.new(name=nombre)
+    mat.use_nodes = True
+    bsdf = mat.node_tree.nodes.get("Principled BSDF")
+    if bsdf:
+        bsdf.inputs["Base Color"].default_value = color
+        bsdf.inputs["Roughness"].default_value = rugosidad
+        if "Metallic" in bsdf.inputs:
+            bsdf.inputs["Metallic"].default_value = metalico
+        if emision > 0 and "Emission Strength" in bsdf.inputs:
+            bsdf.inputs["Emission Color"].default_value = color
+            bsdf.inputs["Emission Strength"].default_value = emision
+    return mat
+
+# Paleta cromática histórica de Sevilla (piedra albero, ladrillo almohade, oro, bronce)
+mat_albero       = material("Piedra_Albero_Sevilla", (0.82, 0.72, 0.54, 1.0), 0.82)
+mat_albero_osc   = material("Piedra_Albero_Oscura", (0.66, 0.56, 0.40, 1.0), 0.88)
+mat_albero_claro = material("Piedra_Labrada_Clara", (0.90, 0.83, 0.68, 1.0), 0.72)
+mat_ladrillo_gir = material("Ladrillo_Almohade_Giralda", (0.76, 0.54, 0.38, 1.0), 0.80)
+mat_sebka        = material("Relieve_Sebka_Albero", (0.88, 0.77, 0.60, 1.0), 0.75)
+mat_marmol_bl    = material("Marmol_Blanco", (0.92, 0.90, 0.86, 1.0), 0.25)
+mat_marmol_negro = material("Marmol_Negro_Veteado", (0.14, 0.14, 0.16, 1.0), 0.20)
+mat_teja_cupula  = material("Cubierta_Piedra_Teja", (0.52, 0.42, 0.32, 1.0), 0.78)
+mat_pizarra      = material("Cubierta_Crucero", (0.28, 0.30, 0.34, 1.0), 0.70)
+mat_oro          = material("Oro_Retablo_Giraldillo", (0.92, 0.74, 0.22, 1.0), 0.22, 0.95)
+mat_bronce       = material("Bronce_Campanas_Giraldillo", (0.38, 0.30, 0.18, 1.0), 0.35, 0.85)
+mat_hierro       = material("Forja_Rejas_Sevilla", (0.12, 0.12, 0.14, 1.0), 0.40, 0.80)
+mat_madera_coro  = material("Caoba_Silleria_Coro", (0.26, 0.13, 0.07, 1.0), 0.48)
+mat_madera_puerta= material("Madera_Portones", (0.22, 0.14, 0.08, 1.0), 0.70)
+mat_tronco       = material("Tronco_Naranjo", (0.32, 0.21, 0.12, 1.0), 0.90)
+mat_hoja_naranjo = material("Copa_Naranjo", (0.14, 0.36, 0.14, 1.0), 0.75)
+mat_naranja      = material("Fruto_Naranja", (0.95, 0.45, 0.05, 1.0), 0.50)
+mat_agua         = material("Agua_Fuente_Mudejar", (0.15, 0.52, 0.65, 1.0), 0.10)
+mat_espuma       = material("Espuma_Surtidor", (0.88, 0.96, 1.0, 1.0), 0.20, 0.0, 0.4)
+mat_vidriera_az  = material("Vidriera_Azul_Cobalto", (0.18, 0.48, 0.95, 1.0), 0.15, 0.0, 1.8)
+mat_vidriera_ro  = material("Vidriera_Rojo_Rubi", (0.95, 0.22, 0.18, 1.0), 0.15, 0.0, 1.6)
+mat_vidriera_am  = material("Vidriera_Ambar_Oro", (0.98, 0.76, 0.20, 1.0), 0.15, 0.0, 2.0)
+mat_luz_calida   = material("Luz_Interior_Sagrada", (1.0, 0.88, 0.62, 1.0), 0.10, 0.0, 3.2)
+mat_terracota    = material("Pavimento_Ladrillo_Patio", (0.68, 0.42, 0.28, 1.0), 0.85)
+
+# ==========================================
+# 2. PRIMITIVAS Y CONSTRUCTORES GEOMÉTRICOS
+# ==========================================
+def asignar_mat(obj, mat):
+    if mat:
+        if obj.data.materials:
+            obj.data.materials[0] = mat
+        else:
+            obj.data.materials.append(mat)
+    return obj
+
+def caja(nombre, centro, tamano, mat, rot=(0, 0, 0)):
+    bpy.ops.mesh.primitive_cube_add(size=1.0, location=centro, rotation=rot)
+    obj = bpy.context.active_object
+    obj.name = nombre
+    obj.scale = tamano
+    return asignar_mat(obj, mat)
+
+def cilindro(nombre, centro, radio, alto, mat, vertices=16, rot=(0, 0, 0)):
+    bpy.ops.mesh.primitive_cylinder_add(vertices=vertices, radius=radio, depth=alto, location=centro, rotation=rot)
+    obj = bpy.context.active_object
+    obj.name = nombre
+    return asignar_mat(obj, mat)
+
+def cono(nombre, centro, r1, r2, alto, mat, vertices=8, rot=(0, 0, 0)):
+    bpy.ops.mesh.primitive_cone_add(vertices=vertices, radius1=r1, radius2=r2, depth=alto, location=centro, rotation=rot)
+    obj = bpy.context.active_object
+    obj.name = nombre
+    return asignar_mat(obj, mat)
+
+def esfera(nombre, centro, radio, mat, escala=(1, 1, 1)):
+    bpy.ops.mesh.primitive_uv_sphere_add(segments=16, ring_count=12, radius=radio, location=centro)
+    obj = bpy.context.active_object
+    obj.name = nombre
+    obj.scale = escala
+    return asignar_mat(obj, mat)
+
+def barra_yz(nombre, x, y1, z1, y2, z2, grosor, mat):
+    dy = y2 - y1
+    dz = z2 - z1
+    largo = math.hypot(dy, dz)
+    ang = math.atan2(dz, dy)
+    cy = (y1 + y2) * 0.5
+    cz = (z1 + z2) * 0.5
+    return caja(nombre, (x, cy, cz), (grosor, largo, grosor), mat, rot=(ang, 0, 0))
+
+def barra_xz(nombre, x1, z1, x2, z2, y, grosor, mat):
+    dx = x2 - x1
+    dz = z2 - z1
+    largo = math.hypot(dx, dz)
+    ang = -math.atan2(dz, dx)
+    cx = (x1 + x2) * 0.5
+    cz = (z1 + z2) * 0.5
+    return caja(nombre, (cx, y, cz), (largo, grosor, grosor), mat, rot=(0, ang, 0))
+
+def pinaculo_gotico(nombre, x, y, z_base, escala=1.0):
+    s = escala
+    caja(f"{nombre}_Base", (x, y, z_base + 0.8 * s), (1.1 * s, 1.1 * s, 1.6 * s), mat_albero_claro)
+    caja(f"{nombre}_Cuerpo", (x, y, z_base + 2.2 * s), (0.85 * s, 0.85 * s, 1.4 * s), mat_albero)
+    cono(f"{nombre}_Aguja", (x, y, z_base + 4.2 * s), 0.65 * s, 0.04 * s, 2.8 * s, mat_albero_claro, vertices=4, rot=(0, 0, math.pi / 4))
+    esfera(f"{nombre}_Floron", (x, y, z_base + 5.7 * s), 0.16 * s, mat_oro)
+
+# ==========================================
+# 3. PLATAFORMA MONUMENTAL Y PAVIMENTO (LONJA)
+# ==========================================
+caja("Lonja_Gradas_Inf", (2, 10, -0.9), (96.0, 96.0, 0.6), mat_albero_osc)
+caja("Lonja_Gradas_Med", (2, 10, -0.45), (90.0, 90.0, 0.35), mat_albero)
+caja("Suelo_Catedral_Base", (0, 0, -0.15), (78.0, 54.0, 0.3), mat_marmol_bl)
+
+# Damero interior de mármol blanco y negro
+for ix in range(-6, 7):
+    for iy in range(-4, 5):
+        mat_dam = mat_marmol_bl if (ix + iy) % 2 == 0 else mat_marmol_negro
+        caja(f"Damero_{ix}_{iy}", (ix * 5.0, iy * 5.0, 0.02), (4.9, 4.9, 0.04), mat_dam)
+
+# Columnas con cadenas perimetrales de la Lonja de Sevilla
+for lx in range(-42, 47, 8):
+    for ly in (-34, 54):
+        cilindro(f"Col_Lonja_{lx}_{ly}", (lx, ly, 0.9), 0.28, 1.8, mat_albero_osc, vertices=10)
+        caja(f"Cadena_Lonja_{lx}_{ly}", (lx + 4.0, ly, 0.95), (8.0, 0.08, 0.08), mat_hierro)
+
+# ==========================================
+# 4. PLANTA DE 5 NAVES + CAPILLAS Y PILARES FASCICULADOS
+# ==========================================
+tramos_x = [-30.0, -22.5, -15.0, -7.5, 0.0, 7.5, 15.0, 22.5, 30.0]
+lineas_y = [-18.5, -12.5, -6.0, 6.0, 12.5, 18.5]
+
+def pilar_fasciculado(nombre, x, y, alto):
+    cilindro(f"{nombre}_Basa", (x, y, 0.6), 1.05, 1.2, mat_albero_osc, vertices=8)
+    cilindro(f"{nombre}_Nucleo", (x, y, alto * 0.5), 0.78, alto, mat_albero, vertices=12)
+    for ang in (0, math.pi * 0.5, math.pi, math.pi * 1.5):
+        bx = x + math.cos(ang) * 0.72
+        by = y + math.sin(ang) * 0.72
+        cilindro(f"{nombre}_Baq_{ang:.1f}", (bx, by, alto * 0.5), 0.22, alto, mat_albero_claro, vertices=8)
+    cilindro(f"{nombre}_Capitel", (x, y, alto - 0.5), 1.0, 0.9, mat_albero_claro, vertices=8)
+
+for ix, x in enumerate(tramos_x):
+    for iy, y in enumerate(lineas_y):
+        if abs(x) < 29.0:
+            h_pil = 25.0 if abs(y) == 6.0 else (18.5 if abs(y) == 12.5 else 13.0)
+            if abs(x) == 0.0 and abs(y) == 6.0:
+                cilindro(f"Pilar_Toral_{iy}", (x, y, 13.0), 1.15, 26.0, mat_albero_claro, vertices=16)
+            else:
+                pilar_fasciculado(f"Pilar_{ix}_{iy}", x, y, h_pil)
+
+# ==========================================
+# 5. VOLÚMENES ESCALONADOS, AZOTEAS Y BÓVEDAS
+# ==========================================
+for s_y in (-1, 1):
+    y_cl = s_y * 6.0
+    caja(f"Muro_Claristorio_{s_y}", (0.0, y_cl, 22.2), (60.0, 0.85, 7.6), mat_albero)
+    caja(f"Cresteria_Central_{s_y}", (0.0, y_cl, 26.3), (60.4, 0.45, 0.9), mat_albero_claro)
+
+caja("Boveda_Techo_Central", (0.0, 0.0, 25.8), (60.0, 12.0, 0.8), mat_albero)
+barra_yz("Tejado_Central_Sur", 0.0, -6.2, 26.0, 0.0, 28.8, 0.6, mat_teja_cupula)
+barra_yz("Tejado_Central_Norte", 0.0, 6.2, 26.0, 0.0, 28.8, 0.6, mat_teja_cupula)
+caja("Faldones_Central_Sur", (0.0, -3.1, 27.3), (60.2, 6.8, 0.45), mat_teja_cupula, rot=(0.42, 0, 0))
+caja("Faldones_Central_Norte", (0.0, 3.1, 27.3), (60.2, 6.8, 0.45), mat_teja_cupula, rot=(-0.42, 0, 0))
+caja("Cumbrera_Central", (0.0, 0.0, 28.9), (60.4, 0.45, 0.45), mat_oro)
+
+# Naves Intermedias (H = 19.0 m)
+for s_y in (-1, 1):
+    yc = s_y * 9.25
+    ym = s_y * 12.5
+    caja(f"Cubierta_Nave_Intermedia_{s_y}", (0.0, yc, 18.6), (60.0, 6.6, 0.8), mat_teja_cupula)
+    caja(f"Muro_Nave_Intermedia_{s_y}", (0.0, ym, 16.0), (60.0, 0.85, 6.0), mat_albero)
+    caja(f"Pretil_Intermedia_{s_y}", (0.0, ym, 19.3), (60.4, 0.45, 0.8), mat_albero_claro)
+
+# Naves Laterales Externas (H = 13.5 m)
+for s_y in (-1, 1):
+    yc = s_y * 15.5
+    ym = s_y * 18.5
+    caja(f"Cubierta_Nave_Externa_{s_y}", (0.0, yc, 13.1), (60.0, 6.2, 0.8), mat_teja_cupula)
+    caja(f"Muro_Nave_Externa_{s_y}", (0.0, ym, 11.2), (60.0, 0.9, 4.6), mat_albero)
+    caja(f"Pretil_Externa_{s_y}", (0.0, ym, 13.8), (60.4, 0.45, 0.75), mat_albero_claro)
+
+# Capillas Perimetrales entre Contrafuertes (H = 9.5 m)
+for s_y in (-1, 1):
+    yc = s_y * 20.65
+    ym = s_y * 22.8
+    caja(f"Cubierta_Capillas_{s_y}", (0.0, yc, 9.2), (60.0, 4.4, 0.7), mat_teja_cupula)
+    caja(f"Muro_Exterior_Capillas_{s_y}", (0.0, ym, 4.75), (60.0, 1.0, 9.5), mat_albero)
+    caja(f"Pretil_Capillas_{s_y}", (0.0, ym, 9.8), (60.4, 0.5, 0.7), mat_albero_claro)
+
+# ==========================================
+# 6. CRUCERO (TRANSEPTO) Y CIMBORRIO CENTRAL
+# ==========================================
+caja("Crucero_Cuerpo_Norte", (0.0, 14.8, 19.5), (12.0, 17.5, 13.0), mat_albero)
+caja("Crucero_Cuerpo_Sur", (0.0, -14.8, 19.5), (12.0, 17.5, 13.0), mat_albero)
+caja("Tejado_Crucero_Oeste", (-3.1, 0.0, 27.3), (6.8, 47.2, 0.45), mat_pizarra, rot=(0, -0.42, 0))
+caja("Tejado_Crucero_Este", (3.1, 0.0, 27.3), (6.8, 47.2, 0.45), mat_pizarra, rot=(0, 0.42, 0))
+caja("Cumbrera_Crucero", (0.0, 0.0, 28.9), (0.45, 47.4, 0.45), mat_oro)
+
+cilindro("Cimborrio_Tambor_Base", (0.0, 0.0, 28.5), 5.6, 3.8, mat_albero_claro, vertices=8)
+cilindro("Cimborrio_Cuerpo_Sup", (0.0, 0.0, 31.2), 4.8, 2.6, mat_albero, vertices=8)
+cono("Cimborrio_Cupula", (0.0, 0.0, 33.8), 5.0, 1.2, 2.8, mat_teja_cupula, vertices=8)
+cilindro("Cimborrio_Linterna", (0.0, 0.0, 36.2), 1.4, 2.4, mat_albero_claro, vertices=8)
+cono("Cimborrio_Chapitel", (0.0, 0.0, 38.4), 1.5, 0.05, 2.4, mat_oro, vertices=8)
+caja("Cruz_Cimborrio_V", (0.0, 0.0, 40.3), (0.18, 0.18, 1.8), mat_oro)
+caja("Cruz_Cimborrio_H", (0.0, 0.0, 40.6), (0.18, 1.1, 0.18), mat_oro)
+
+for i in range(8):
+    ang = i * (math.pi / 4.0) + (math.pi / 8.0)
+    px = math.cos(ang) * 5.2
+    py = math.sin(ang) * 5.2
+    pinaculo_gotico(f"Pin_Cimborrio_{i}", px, py, 29.5, escala=0.65)
+
+# ==========================================
+# 7. DOBLE BATERÍA DE ARBOTANTES, CONTRAFUERTES Y VIDRIERAS
+# ==========================================
+colores_vidriera = [mat_vidriera_az, mat_vidriera_ro, mat_vidriera_am]
+
+for ix, x in enumerate(tramos_x):
+    if abs(x) < 2.0:
+        continue
+
+    for s_y in (-1, 1):
+        caja(f"Contrafuerte_Ext_{ix}_{s_y}", (x, s_y * 23.2, 6.2), (1.35, 1.8, 12.4), mat_albero_osc)
+        pinaculo_gotico(f"Pin_Ext_{ix}_{s_y}", x, s_y * 23.2, 12.4, escala=0.82)
+
+        caja(f"Botarel_Med_{ix}_{s_y}", (x, s_y * 18.5, 9.8), (1.25, 1.4, 19.6), mat_albero_osc)
+        pinaculo_gotico(f"Pin_Med_{ix}_{s_y}", x, s_y * 18.5, 19.6, escala=0.92)
+
+        caja(f"Botarel_Int_{ix}_{s_y}", (x, s_y * 12.5, 12.2), (1.2, 1.3, 24.4), mat_albero_osc)
+        pinaculo_gotico(f"Pin_Int_{ix}_{s_y}", x, s_y * 12.5, 24.4, escala=1.0)
+
+        pinaculo_gotico(f"Pin_Claristorio_{ix}_{s_y}", x, s_y * 6.0, 26.0, escala=0.78)
+
+        barra_yz(f"Arbotante_Inf_1_{ix}_{s_y}", x, s_y * 18.5, 14.2, s_y * 12.5, 17.8, 0.55, mat_albero_claro)
+        barra_yz(f"Arbotante_Inf_2_{ix}_{s_y}", x, s_y * 18.5, 16.0, s_y * 12.5, 19.2, 0.45, mat_albero)
+
+        barra_yz(f"Arbotante_Sup_1_{ix}_{s_y}", x, s_y * 12.5, 19.5, s_y * 6.0, 23.8, 0.58, mat_albero_claro)
+        barra_yz(f"Arbotante_Sup_2_{ix}_{s_y}", x, s_y * 12.5, 21.4, s_y * 6.0, 25.4, 0.48, mat_albero)
+
+    if ix < len(tramos_x) - 1:
+        xm = (x + tramos_x[ix + 1]) * 0.5
+        if abs(xm) > 4.5:
+            mat_v = colores_vidriera[ix % 3]
+            for s_y in (-1, 1):
+                caja(f"Vidriera_Cl_{ix}_{s_y}", (xm, s_y * 6.05, 22.2), (3.4, 0.95, 4.6), mat_v)
+                caja(f"Vidriera_Int_{ix}_{s_y}", (xm, s_y * 12.55, 16.0), (3.2, 0.95, 3.6), colores_vidriera[(ix + 1) % 3])
+                caja(f"Vidriera_Cap_{ix}_{s_y}", (xm, s_y * 22.85, 5.2), (2.8, 1.1, 4.2), colores_vidriera[(ix + 2) % 3])
+
+# ==========================================
+# 8. LA GIRALDA DE SEVILLA (ESQUINA NORESTE: X = 26.5, Y = 24.5)
+# ==========================================
+gx, gy = 26.5, 24.5
+
+caja("Giralda_Basamento", (gx, gy, 3.0), (13.6, 13.6, 6.0), mat_albero_osc)
+caja("Giralda_Cana_Almohade", (gx, gy, 27.0), (13.2, 13.2, 42.0), mat_ladrillo_gir)
+
+for sx in (-1, 1):
+    for sy in (-1, 1):
+        caja(f"Giralda_Esquina_{sx}_{sy}", (gx + sx * 6.45, gy + sy * 6.45, 27.0), (0.6, 0.6, 42.0), mat_albero_claro)
+
+niveles_sebka = [14.0, 26.5, 39.0]
+for nz in niveles_sebka:
+    for cara in range(4):
+        for offset in (-3.4, 3.4):
+            if cara == 0:
+                px, py, sx, sy = gx + offset, gy - 6.65, 3.2, 0.28
+            elif cara == 1:
+                px, py, sx, sy = gx + offset, gy + 6.65, 3.2, 0.28
+            elif cara == 2:
+                px, py, sx, sy = gx + 6.65, gy + offset, 0.28, 3.2
+            else:
+                px, py, sx, sy = gx - 6.65, gy + offset, 0.28, 3.2
+            caja(f"Pano_Sebka_{nz}_{cara}_{offset}", (px, py, nz), (sx, sy, 8.8), mat_sebka)
+
+        if cara == 0:
+            vx, vy, vsx, vsy = gx, gy - 6.65, 2.0, 0.35
+            bx, by, bsx, bsy = gx, gy - 7.0, 2.8, 0.7
+        elif cara == 1:
+            vx, vy, vsx, vsy = gx, gy + 6.65, 2.0, 0.35
+            bx, by, bsx, bsy = gx, gy + 7.0, 2.8, 0.7
+        elif cara == 2:
+            vx, vy, vsx, vsy = gx + 6.65, gy, 0.35, 2.0
+            bx, by, bsx, bsy = gx + 7.0, gy, 0.7, 2.8
+        else:
+            vx, vy, vsx, vsy = gx - 6.65, gy, 0.35, 2.0
+            bx, by, bsx, bsy = gx - 7.0, gy, 0.7, 2.8
+        caja(f"Ajimez_Giralda_{nz}_{cara}", (vx, vy, nz - 0.5), (vsx, vsy, 3.4), mat_marmol_negro)
+        caja(f"Balcon_Giralda_{nz}_{cara}", (bx, by, nz - 2.3), (bsx, bsy, 0.45), mat_albero_claro)
+
+caja("Giralda_Cornisa_Almohade", (gx, gy, 48.4), (14.4, 14.4, 1.0), mat_albero_claro)
+caja("Giralda_Balaustrada_Azucenas", (gx, gy, 49.4), (13.8, 13.8, 1.1), mat_albero)
+
+for sx in (-1, 1):
+    for sy in (-1, 1):
+        jx, jy = gx + sx * 6.5, gy + sy * 6.5
+        cilindro(f"Pedestal_Azucena_{sx}_{sy}", (jx, jy, 50.4), 0.55, 1.2, mat_albero_claro, vertices=8)
+        esfera(f"Jarra_Azucena_{sx}_{sy}", (jx, jy, 51.5), 0.5, mat_bronce, escala=(1, 1, 1.4))
+        cono(f"Ramo_Azucenas_{sx}_{sy}", (jx, jy, 52.6), 0.45, 0.08, 1.4, mat_oro, vertices=6)
+
+caja("Giralda_Cuerpo_Campanas_Nucleo", (gx, gy, 54.8), (10.6, 10.6, 10.5), mat_albero_claro)
+for cara in range(4):
+    for off in (-3.1, 0.0, 3.1):
+        if cara < 2:
+            s_dir = -1 if cara == 0 else 1
+            cx, cy = gx + off, gy + s_dir * 5.35
+            sx, sy = 1.6, 0.4
+        else:
+            s_dir = 1 if cara == 2 else -1
+            cx, cy = gx + s_dir * 5.35, gy + off
+            sx, sy = 0.4, 1.6
+        caja(f"Vano_Campana_{cara}_{off}", (cx, cy, 54.5), (sx, sy, 5.2), mat_marmol_negro)
+        cono(f"Campana_Bronce_{cara}_{off}", (cx, cy, 55.6), 0.55, 0.2, 1.1, mat_bronce, vertices=10)
+
+caja("Giralda_Cornisa_Campanas", (gx, gy, 60.3), (11.6, 11.6, 0.9), mat_albero_claro)
+caja("Giralda_Cuerpo_Estrellas", (gx, gy, 63.6), (7.6, 7.6, 5.8), mat_albero_claro)
+caja("Giralda_Cornisa_Estrellas", (gx, gy, 66.8), (8.4, 8.4, 0.7), mat_albero)
+
+cilindro("Giralda_Tambor_Redondo", (gx, gy, 70.0), 3.2, 5.0, mat_albero_claro, vertices=12)
+esfera("Giralda_Cupulin", (gx, gy, 73.2), 3.1, mat_teja_cupula, escala=(1.0, 1.0, 1.15))
+cilindro("Giralda_Linterna_Sup", (gx, gy, 76.5), 1.35, 2.6, mat_albero_claro, vertices=10)
+cono("Giralda_Pinaculo_Sup", (gx, gy, 78.8), 1.4, 0.2, 2.2, mat_albero_osc, vertices=10)
+
+esfera("Giralda_Tinaja_Bronce", (gx, gy, 80.6), 0.95, mat_oro)
+cilindro("Giraldillo_Cuerpo", (gx, gy, 82.8), 0.35, 3.2, mat_bronce, vertices=10)
+esfera("Giraldillo_Cabeza_Casco", (gx, gy, 84.7), 0.42, mat_oro)
+caja("Giraldillo_Labaro_Astil", (gx + 0.65, gy, 83.4), (0.12, 0.12, 3.8), mat_oro)
+caja("Giraldillo_Labaro_Bandera", (gx + 1.35, gy, 84.2), (1.3, 0.08, 1.8), mat_oro)
+barra_xz("Giraldillo_Palma", gx - 0.3, 82.8, gx - 1.4, 84.6, gy, 0.14, mat_oro)
+
+# ==========================================
+# 9. CAPILLA REAL (CABECERA ESTE: X = 30 a 41)
+# ==========================================
+caja("Capilla_Real_Base", (34.8, 0.0, 8.5), (9.6, 15.0, 17.0), mat_albero)
+cilindro("Capilla_Real_Abside", (39.0, 0.0, 8.5), 7.2, 17.0, mat_albero_claro, vertices=12)
+caja("Capilla_Real_Cornisa", (35.5, 0.0, 17.4), (11.5, 16.0, 0.9), mat_albero_claro)
+cilindro("Capilla_Real_Tambor", (36.0, 0.0, 19.8), 5.6, 4.0, mat_albero_claro, vertices=12)
+esfera("Capilla_Real_Cupula", (36.0, 0.0, 22.0), 5.5, mat_teja_cupula, escala=(1.0, 1.0, 0.85))
+cilindro("Capilla_Real_Linterna", (36.0, 0.0, 26.8), 1.3, 2.4, mat_albero_claro, vertices=8)
+cono("Capilla_Real_Chapitel", (36.0, 0.0, 28.8), 1.4, 0.08, 1.8, mat_oro, vertices=8)
+
+for s_y in (-1, 1):
+    caja(f"Cabecera_Colateral_{s_y}", (32.5, s_y * 13.5, 6.8), (5.5, 9.5, 13.6), mat_albero)
+    pinaculo_gotico(f"Pin_Cabecera_{s_y}", 35.0, s_y * 17.5, 13.6, escala=0.8)
+
+# ==========================================
+# 10. FACHADA OCCIDENTAL (PUERTAS DE LA ASUNCIÓN, BAUTISMO Y SAN MIGUEL)
+# ==========================================
+fx = -30.0
+caja("Fachada_Oeste_Central", (fx, 0.0, 13.0), (1.4, 12.6, 26.0), mat_albero)
+caja("Fachada_Oeste_Int_Sur", (fx, -9.2, 9.5), (1.3, 6.5, 19.0), mat_albero)
+caja("Fachada_Oeste_Int_Norte", (fx, 9.2, 9.5), (1.3, 6.5, 19.0), mat_albero)
+caja("Fachada_Oeste_Ext_Sur", (fx, -15.5, 6.8), (1.2, 6.2, 13.6), mat_albero)
+caja("Fachada_Oeste_Ext_Norte", (fx, 15.5, 6.8), (1.2, 6.2, 13.6), mat_albero)
+
+for py in (-18.5, -12.5, -6.0, 6.0, 12.5, 18.5):
+    h_cf = 27.0 if abs(py) == 6.0 else (20.0 if abs(py) == 12.5 else 14.5)
+    caja(f"Contrafuerte_Oeste_{py}", (fx - 0.9, py, h_cf * 0.5), (1.8, 1.5, h_cf), mat_albero_claro)
+    pinaculo_gotico(f"Pin_Oeste_{py}", fx - 0.9, py, h_cf, escala=0.95)
+
+def portada_gotica_abocinada(nombre, x, y, ancho, alto, prof):
+    caja(f"{nombre}_Macizo", (x - prof * 0.4, y, alto * 0.55), (prof, ancho + 2.2, alto * 1.1), mat_albero_claro)
+    for i in range(4):
+        a_w = ancho - i * 0.55
+        a_h = alto - i * 0.45
+        px = x - prof + i * 0.22
+        caja(f"{nombre}_Jamba_Izq_{i}", (px, y - a_w * 0.5, a_h * 0.35), (0.35, 0.35, a_h * 0.7), mat_albero_osc)
+        caja(f"{nombre}_Jamba_Der_{i}", (px, y + a_w * 0.5, a_h * 0.35), (0.35, 0.35, a_h * 0.7), mat_albero_osc)
+        barra_yz(f"{nombre}_Arco_Izq_{i}", px, y - a_w * 0.5, a_h * 0.7, y, a_h, 0.32, mat_albero_claro)
+        barra_yz(f"{nombre}_Arco_Der_{i}", px, y + a_w * 0.5, a_h * 0.7, y, a_h, 0.32, mat_albero_claro)
+    barra_yz(f"{nombre}_Gablete_Izq", x - prof, y - ancho * 0.6, alto * 0.75, y, alto * 1.32, 0.38, mat_albero_claro)
+    barra_yz(f"{nombre}_Gablete_Der", x - prof, y + ancho * 0.6, alto * 0.75, y, alto * 1.32, 0.38, mat_albero_claro)
+    esfera(f"{nombre}_Floron_Gablete", (x - prof, y, alto * 1.36), 0.32, mat_oro)
+    caja(f"{nombre}_Timpano", (x - 0.3, y, alto * 0.78), (0.4, ancho * 0.72, alto * 0.28), mat_albero)
+    caja(f"{nombre}_Puerta_Madera", (x - 0.2, y, alto * 0.32), (0.45, ancho * 0.72, alto * 0.64), mat_madera_puerta)
+    caja(f"{nombre}_Parteluz", (x - 0.5, y, alto * 0.32), (0.35, 0.28, alto * 0.64), mat_albero_claro)
+
+portada_gotica_abocinada("Puerta_Asuncion", fx, 0.0, 6.2, 11.5, 2.2)
+portada_gotica_abocinada("Puerta_Bautismo", fx, -12.5, 4.2, 8.2, 1.5)
+portada_gotica_abocinada("Puerta_San_Miguel", fx, 12.5, 4.2, 8.2, 1.5)
+
+rx = fx - 0.8
+cilindro("Roseton_Oeste_Marco", (rx, 0.0, 19.2), 3.8, 0.65, mat_albero_claro, vertices=24, rot=(0, math.pi / 2, 0))
+cilindro("Roseton_Oeste_Vidrio", (rx + 0.1, 0.0, 19.2), 3.3, 0.35, mat_vidriera_am, vertices=24, rot=(0, math.pi / 2, 0))
+cilindro("Roseton_Oeste_Nucleo", (rx - 0.1, 0.0, 19.2), 1.1, 0.5, mat_vidriera_ro, vertices=16, rot=(0, math.pi / 2, 0))
+for i in range(12):
+    ang = i * (math.pi / 6.0)
+    ry = math.cos(ang) * 1.7
+    rz = 19.2 + math.sin(ang) * 1.7
+    caja(f"Radio_Roseton_{i}", (rx - 0.12, ry, rz), (0.25, 0.14, 3.4), mat_albero_claro, rot=(ang + math.pi / 2, 0, 0))
+
+portada_gotica_abocinada("Puerta_Principe_Sur", 0.0, -23.0, 5.2, 10.2, 1.8)
+cilindro("Roseton_Sur_Crucero", (0.0, -23.5, 19.0), 3.1, 0.5, mat_vidriera_az, vertices=20, rot=(math.pi / 2, 0, 0))
+
+# ==========================================
+# 11. PATIO DE LOS NARANJOS Y PUERTA DEL PERDÓN (NORTE: Y = 23 a 51)
+# ==========================================
+caja("Suelo_Patio_Naranjos", (-4.0, 37.0, 0.05), (46.0, 28.0, 0.15), mat_terracota)
+caja("Muro_Patio_Oeste", (-27.0, 37.0, 4.2), (1.1, 28.0, 8.4), mat_albero)
+caja("Muro_Patio_Este", (19.0, 37.0, 4.2), (1.1, 28.0, 8.4), mat_albero)
+caja("Muro_Patio_Norte", (-4.0, 51.0, 4.5), (47.0, 1.2, 9.0), mat_albero)
+
+for ax in range(-26, 19, 2):
+    caja(f"Almena_Base_{ax}", (ax, 51.0, 9.35), (1.1, 0.8, 0.7), mat_albero_claro)
+    caja(f"Almena_Pico_{ax}", (ax, 51.0, 9.9), (0.6, 0.8, 0.5), mat_albero_claro)
+
+for gx_p in range(-22, 16, 4):
+    cilindro(f"Col_Claustro_N_{gx_p}", (gx_p, 47.8, 2.8), 0.25, 5.6, mat_marmol_bl, vertices=10)
+caja("Techo_Galeria_Norte", (-4.0, 49.4, 5.9), (44.0, 3.4, 0.5), mat_teja_cupula)
+
+caja("Puerta_Perdon_Torreon", (-4.0, 51.4, 6.2), (9.2, 2.6, 12.4), mat_albero_claro)
+cilindro("Puerta_Perdon_Arco_Herradura", (-4.0, 51.9, 5.2), 2.8, 1.8, mat_albero_osc, vertices=16, rot=(math.pi / 2, 0, 0))
+caja("Puerta_Perdon_Hojas_Bronce", (-4.0, 51.5, 3.2), (4.6, 0.5, 6.4), mat_bronce)
+caja("Puerta_Perdon_Almenas_Sup", (-4.0, 51.4, 12.8), (9.6, 2.8, 0.9), mat_oro)
+
+filas_naranjos_x = [-20.0, -14.5, -9.5, 1.5, 6.5, 12.0]
+filas_naranjos_y = [28.0, 33.5, 39.5, 44.5]
+
+for nx in filas_naranjos_x:
+    caja(f"Canalillo_Riego_{nx}", (nx, 36.2, 0.14), (0.35, 18.0, 0.08), mat_agua)
+    for ny in filas_naranjos_y:
+        caja(f"Alcorque_{nx}_{ny}", (nx, ny, 0.18), (1.9, 1.9, 0.18), mat_albero_osc)
+        cilindro(f"Tronco_Naranjo_{nx}_{ny}", (nx, ny, 1.25), 0.18, 2.3, mat_tronco, vertices=8)
+        esfera(f"Copa_Naranjo_{nx}_{ny}", (nx, ny, 2.85), 1.45, mat_hoja_naranjo, escala=(1.0, 1.0, 0.88))
+        for ang_n in (0.4, 1.9, 3.5, 5.0):
+            fx_n = nx + math.cos(ang_n) * 1.18
+            fy_n = ny + math.sin(ang_n) * 1.18
+            esfera(f"Naranja_{nx}_{ny}_{ang_n:.1f}", (fx_n, fy_n, 2.75), 0.14, mat_naranja)
+
+fx_p, fy_p = -4.0, 36.5
+cilindro("Fuente_Patio_Grada", (fx_p, fy_p, 0.25), 3.4, 0.35, mat_albero_claro, vertices=8)
+cilindro("Fuente_Patio_Taza_Oct", (fx_p, fy_p, 0.72), 2.6, 0.75, mat_marmol_bl, vertices=8)
+agua_patio = cilindro("Fuente_Patio_Agua", (fx_p, fy_p, 0.98), 2.35, 0.12, mat_agua, vertices=12)
+bpy.anim.agua(agua_patio, 1.3)
+
+cilindro("Fuente_Patio_Taza_Visigoda", (fx_p, fy_p, 1.45), 1.15, 0.85, mat_albero_osc, vertices=12)
+surtidor_patio = cono("Fuente_Patio_Surtidor", (fx_p, fy_p, 2.35), 0.35, 0.08, 1.4, mat_espuma, vertices=10)
+bpy.anim.loop(surtidor_patio, 1.2, lambda t: (0.0, 0.0, 0.22 * math.sin(t * math.pi * 2.0)))
+for j_ch in range(6):
+    ang_ch = j_ch * (math.pi * 2.0 / 6.0)
+    gota_f = esfera(f"Gota_Fuente_Patio_{j_ch}", (fx_p, fy_p, 1.95), 0.16, mat_espuma)
+    bpy.anim.loop(gota_f, 1.4, lambda t, a=ang_ch: (
+        math.cos(a) * 1.45 * t,
+        math.sin(a) * 1.45 * t,
+        2.8 * t * (1.0 - t) - 0.7 * t * t
+    ))
+
+# ==========================================
+# 12. INTERIOR MONUMENTAL: CORO, ÓRGANOS, RETABLO MAYOR Y TUMBA DE COLÓN
+# ==========================================
+caja("Coro_Trascoro_Marmol", (-15.0, 0.0, 3.2), (1.1, 10.6, 6.4), mat_marmol_bl)
+for s_y in (-1, 1):
+    caja(f"Coro_Muro_Lat_{s_y}", (-9.5, s_y * 5.0, 3.2), (11.0, 0.8, 6.4), mat_albero_claro)
+    caja(f"Coro_Silleria_Alta_{s_y}", (-9.5, s_y * 4.2, 2.2), (9.8, 0.75, 4.4), mat_madera_coro)
+    caja(f"Coro_Silleria_Baja_{s_y}", (-9.5, s_y * 3.3, 1.1), (9.2, 0.65, 2.0), mat_madera_coro)
+
+    caja(f"Organo_Caja_{s_y}", (-9.5, s_y * 4.8, 9.8), (6.5, 1.5, 6.8), mat_madera_coro)
+    caja(f"Organo_Cornisa_Oro_{s_y}", (-9.5, s_y * 4.8, 13.5), (7.0, 1.8, 0.8), mat_oro)
+    for tx in range(-12, -6):
+        cilindro(f"Tubo_Org_{s_y}_{tx}", (tx * 1.0, s_y * 4.0, 10.0), 0.16, 5.8, mat_oro, vertices=8)
+
+cilindro("Coro_Facistol_Base", (-9.5, 0.0, 1.1), 0.7, 2.2, mat_madera_coro, vertices=8)
+cono("Coro_Facistol_Atril", (-9.5, 0.0, 2.6), 0.9, 0.2, 1.1, mat_oro, vertices=4)
+
+caja("Reja_Capilla_Mayor_Inf", (7.5, 0.0, 4.5), (0.28, 10.8, 9.0), mat_hierro)
+caja("Reja_Capilla_Mayor_Friso_Oro", (7.5, 0.0, 9.4), (0.45, 11.0, 1.4), mat_oro)
+caja("Reja_Capilla_Mayor_Cresteria", (7.5, 0.0, 11.2), (0.35, 7.5, 2.4), mat_oro)
+
+caja("Presbiterio_Gradas", (15.0, 0.0, 0.55), (14.5, 10.8, 1.1), mat_marmol_negro)
+caja("Altar_Mayor_Mesa", (16.5, 0.0, 1.8), (2.2, 4.8, 1.4), mat_oro)
+
+rx_m = 21.8
+caja("Retablo_Mayor_Estructura", (rx_m, 0.0, 11.5), (1.4, 10.8, 21.0), mat_oro)
+for cx_calle in range(-4, 5, 2):
+    caja(f"Retablo_Pilar_Calle_{cx_calle}", (rx_m - 0.55, cx_calle * 1.15, 11.5), (0.5, 0.28, 20.5), mat_madera_coro)
+for cz_cuerpo in range(3, 21, 3):
+    caja(f"Retablo_Dosel_Cuerpo_{cz_cuerpo}", (rx_m - 0.65, 0.0, cz_cuerpo * 1.0), (0.65, 10.6, 0.42), mat_oro)
+caja("Retablo_Calvario_Cumbrera", (rx_m - 0.5, 0.0, 22.8), (0.9, 6.0, 2.2), mat_oro)
+
+cx_col, cy_col = -3.5, -10.5
+caja("Colon_Pedestal_Marmol", (cx_col, cy_col, 0.7), (3.4, 2.4, 1.4), mat_marmol_bl)
+for sx in (-1, 1):
+    for sy in (-1, 1):
+        cilindro(f"Heraldo_Colon_{sx}_{sy}", (cx_col + sx * 1.0, cy_col + sy * 0.65, 2.3), 0.28, 1.9, mat_bronce, vertices=10)
+        esfera(f"Cabeza_Heraldo_{sx}_{sy}", (cx_col + sx * 1.0, cy_col + sy * 0.65, 3.4), 0.22, mat_oro)
+caja("Feretro_Cristobal_Colon", (cx_col, cy_col, 3.7), (2.8, 1.35, 0.95), mat_oro)
+
+for lx in (-22.0, -15.0, 0.0, 12.0):
+    cilindro(f"Cable_Lampara_{lx}", (lx, 0.0, 17.5), 0.04, 15.0, mat_hierro, vertices=6)
+    esfera(f"Lampara_Votiva_{lx}", (lx, 0.0, 9.8), 0.55, mat_luz_calida)
+`,
+  },
   {
     id: 'gen_blender52_mecha_paladin',
     name: 'Blender 5.2 Web (BSDF + Modifiers + Z-Up)',
@@ -707,6 +1238,47 @@ function ensurePythonArrayMethods() {
       enumerable: false,
     });
   }
+  const pySliceImpl = function (
+    this: any,
+    start?: number | null,
+    stop?: number | null,
+    step?: number | null
+  ) {
+    const isStr = typeof this === 'string';
+    const arr = isStr ? this.split('') : Array.isArray(this) ? this : Array.from(this || []);
+    const len = arr.length;
+    const st = step == null ? 1 : Number(step);
+    if (st === 0) return isStr ? '' : [];
+    const res: any[] = [];
+    if (st > 0) {
+      const s = start == null ? 0 : start < 0 ? Math.max(0, len + start) : Math.min(len, start);
+      const e = stop == null ? len : stop < 0 ? Math.max(0, len + stop) : Math.min(len, stop);
+      for (let i = s; i < e; i += st) res.push(arr[i]);
+    } else {
+      const s = start == null ? len - 1 : start < 0 ? len + start : Math.min(len - 1, start);
+      const e = stop == null ? -1 : stop < 0 ? len + stop : stop;
+      for (let i = s; i > e; i += st) {
+        if (i >= 0 && i < len) res.push(arr[i]);
+      }
+    }
+    return isStr ? res.join('') : res;
+  };
+  if (!(Array.prototype as any)._pySlice) {
+    Object.defineProperty(Array.prototype, '_pySlice', {
+      value: pySliceImpl,
+      writable: true,
+      configurable: true,
+      enumerable: false,
+    });
+  }
+  if (!strProto._pySlice) {
+    Object.defineProperty(String.prototype, '_pySlice', {
+      value: pySliceImpl,
+      writable: true,
+      configurable: true,
+      enumerable: false,
+    });
+  }
 
   // NUNCA extender Object.prototype (rompe los descriptores de Object.defineProperty en React y Web APIs).
   // Asegurar que Object.prototype no contenga get, setdefault ni update.
@@ -797,13 +1369,63 @@ function parsePythonColor(
 /**
  * Configura cualquier nueva malla creada por Python con todos los materiales del estudio.
  */
+export interface ExtendedPBRMaterialProps {
+  metallic?: number;
+  roughness?: number;
+  emissionColor?: THREE.Color | null;
+  emissionStrength?: number;
+  clearcoat?: number;
+  clearcoatRoughness?: number;
+  anisotropy?: number;
+  anisotropyRotation?: number;
+  transmission?: number;
+  ior?: number;
+  alpha?: number;
+  bumpScale?: number;
+  useNoiseBump?: boolean;
+  useBackfaceCulling?: boolean;
+  flipNormals?: boolean;
+  customGradientMap?: THREE.DataTexture | null;
+  preferPhysicalShader?: boolean;
+  texturePattern?: TexturePatternType;
+  textureRepeat?: number;
+  textureNaturalColor?: boolean;
+}
+
+let cachedNoiseBumpTexture: THREE.DataTexture | null = null;
+function getProceduralNoiseBumpTexture(): THREE.DataTexture {
+  if (cachedNoiseBumpTexture) return cachedNoiseBumpTexture;
+  const size = 128;
+  const data = new Uint8Array(size * size * 4);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const idx = (y * size + x) * 4;
+      const n1 = Math.sin(x * 0.37 + Math.cos(y * 0.41) * 3.1);
+      const n2 = Math.cos(y * 0.53 - Math.sin(x * 0.29) * 2.7);
+      const n3 = Math.sin((x + y) * 0.83) * 0.5;
+      const val = Math.max(0, Math.min(255, Math.floor(((n1 + n2 + n3) / 2.5 * 0.5 + 0.5) * 255)));
+      data[idx] = val;
+      data[idx + 1] = val;
+      data[idx + 2] = val;
+      data[idx + 3] = 255;
+    }
+  }
+  const tex = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(4, 4);
+  tex.needsUpdate = true;
+  cachedNoiseBumpTexture = tex;
+  return tex;
+}
+
 function configureNewlySpawnedMesh(
   mesh: THREE.Mesh,
   baseColor: THREE.Color,
   gradientTexture: THREE.DataTexture,
   outlineThickness: number = 1.25,
   outlineOpacity: number = 0.9,
-  pbrProps?: { metallic?: number; roughness?: number; emissionColor?: THREE.Color; emissionStrength?: number }
+  pbrProps?: ExtendedPBRMaterialProps
 ): void {
   mesh.castShadow = true;
   mesh.receiveShadow = true;
@@ -816,10 +1438,24 @@ function configureNewlySpawnedMesh(
   }
   mesh.userData.undoStack = [] as Float32Array[];
 
-  const stdMat = new THREE.MeshStandardMaterial({
+  const baseRough = pbrProps?.roughness ?? 0.38;
+  const baseMetal = pbrProps?.metallic ?? 0.2;
+  mesh.userData.originalColorHex = `#${baseColor.getHexString()}`;
+  mesh.userData.baseRoughness = baseRough;
+  mesh.userData.baseMetalness = baseMetal;
+  mesh.userData.baseClearcoat = pbrProps?.clearcoat;
+  mesh.userData.baseIor = pbrProps?.ior ?? 1.5;
+
+  const stdMat = new THREE.MeshPhysicalMaterial({
     color: baseColor.clone(),
-    roughness: pbrProps?.roughness ?? 0.38,
-    metalness: pbrProps?.metallic ?? 0.2,
+    roughness: baseRough,
+    metalness: baseMetal,
+    clearcoat: pbrProps?.clearcoat ?? 0,
+    clearcoatRoughness: pbrProps?.clearcoatRoughness ?? 0.08,
+    anisotropy: pbrProps?.anisotropy ?? 0,
+    anisotropyRotation: pbrProps?.anisotropyRotation ?? 0,
+    transmission: pbrProps?.transmission ?? 0,
+    ior: pbrProps?.ior ?? 1.45,
     ...(pbrProps?.emissionColor && (pbrProps.emissionStrength ?? 0) > 0
       ? {
           emissive: pbrProps.emissionColor.clone(),
@@ -828,9 +1464,58 @@ function configureNewlySpawnedMesh(
       : {}),
   });
 
+  const eeveeMaterial = new THREE.MeshPhysicalMaterial({
+    color: baseColor.clone(),
+    roughness: Math.max(0.03, baseRough * 0.92),
+    metalness: baseMetal,
+    clearcoat: pbrProps?.clearcoat ?? 0.12,
+    clearcoatRoughness: pbrProps?.clearcoatRoughness ?? 0.1,
+    anisotropy: pbrProps?.anisotropy ?? 0,
+    anisotropyRotation: pbrProps?.anisotropyRotation ?? 0,
+    transmission: pbrProps?.transmission ?? 0,
+    ior: pbrProps?.ior ?? 1.45,
+    reflectivity: 0.78,
+    envMapIntensity: 1.55,
+    ...(pbrProps?.emissionColor && (pbrProps.emissionStrength ?? 0) > 0
+      ? {
+          emissive: pbrProps.emissionColor.clone(),
+          emissiveIntensity: Math.min(2.5, (pbrProps.emissionStrength ?? 1) * 0.38),
+        }
+      : {}),
+  });
+
+  const defaultCyclesClearcoat =
+    pbrProps?.clearcoat !== undefined
+      ? pbrProps.clearcoat
+      : Math.max(0, (1.0 - baseRough * 0.7) * 0.55);
+
+  const cyclesMaterial = new THREE.MeshPhysicalMaterial({
+    color: baseColor.clone(),
+    roughness: Math.max(0.02, baseRough * 0.75),
+    metalness: Math.min(1.0, baseMetal + 0.05),
+    clearcoat: defaultCyclesClearcoat,
+    clearcoatRoughness: pbrProps?.clearcoatRoughness ?? 0.06,
+    anisotropy: pbrProps?.anisotropy ?? 0,
+    anisotropyRotation: pbrProps?.anisotropyRotation ?? 0,
+    transmission: pbrProps?.transmission ?? 0,
+    ior: pbrProps?.ior ?? 1.5,
+    reflectivity: 0.95,
+    specularIntensity: 1.0,
+    sheen: 0.25,
+    sheenRoughness: 0.35,
+    sheenColor: baseColor.clone().lerp(new THREE.Color(0xffffff), 0.5),
+    envMapIntensity: 1.9,
+    ...(pbrProps?.emissionColor && (pbrProps.emissionStrength ?? 0) > 0
+      ? {
+          emissive: pbrProps.emissionColor.clone(),
+          emissiveIntensity: Math.min(2.8, (pbrProps.emissionStrength ?? 1) * 0.4),
+        }
+      : {}),
+  });
+
   const toonMaterial = new THREE.MeshToonMaterial({
     color: baseColor.clone(),
-    gradientMap: gradientTexture,
+    gradientMap: pbrProps?.customGradientMap || gradientTexture,
     ...(pbrProps?.emissionColor && (pbrProps.emissionStrength ?? 0) > 0
       ? {
           emissive: pbrProps.emissionColor.clone(),
@@ -850,9 +1535,12 @@ function configureNewlySpawnedMesh(
 
   mesh.userData.originalMaterial = stdMat;
   mesh.userData.toonMaterial = toonMaterial;
+  mesh.userData.eeveeMaterial = eeveeMaterial;
+  mesh.userData.cyclesMaterial = cyclesMaterial;
   mesh.userData.matcapMaterial = matcapMaterial;
   mesh.userData.normalDebugMaterial = normalDebugMaterial;
-  mesh.material = toonMaterial;
+  mesh.userData.pbrProps = { ...(pbrProps || {}) };
+  mesh.material = pbrProps?.preferPhysicalShader ? stdMat : toonMaterial;
 
   // Evitar duplicar outlineMesh si ya tiene uno
   const existingOutline = mesh.children.find((c) => c.userData?.isOutlineMesh);
@@ -871,7 +1559,7 @@ function configureNewlySpawnedMesh(
 }
 
 /**
- * Actualiza el color y propiedades PBR/Toon de una malla ya existente en Three.js.
+ * Actualiza el color y propiedades PBR avanzadas (Clearcoat, Anisotropy, Transmission, Alpha, BumpMap) y Toon de una malla en Three.js.
  */
 function applyMaterialToThreeMesh(
   mesh: THREE.Mesh,
@@ -879,21 +1567,116 @@ function applyMaterialToThreeMesh(
   metallic: number = 0.2,
   roughness: number = 0.38,
   emissionColor?: THREE.Color | null,
-  emissionStrength: number = 0
+  emissionStrength: number = 0,
+  extraPbr?: ExtendedPBRMaterialProps
 ) {
   // Las superficies de agua (bpy.anim.agua) usan un shader propio y no reciben colores de material
   if ((mesh.material as THREE.Material).type === 'ShaderMaterial') return;
 
-  const effectiveColor =
+  const texPattern =
+    extraPbr?.texturePattern && extraPbr.texturePattern !== 'none'
+      ? extraPbr.texturePattern
+      : undefined;
+  const texRepeat = extraPbr?.textureRepeat ?? 2;
+  const useNatColor = extraPbr?.textureNaturalColor ?? false;
+  const texPreset = texPattern ? getTexturePresetInfo(texPattern) : null;
+
+  const baseInputColor =
     emissionColor && emissionStrength > 0.5
       ? color.clone().lerp(emissionColor, 0.65)
       : color.clone();
 
-  const stdMat = mesh.userData.originalMaterial as THREE.MeshStandardMaterial | undefined;
+  const effectiveColor =
+    texPattern && useNatColor ? new THREE.Color('#ffffff') : baseInputColor;
+
+  const procColorMap = texPattern
+    ? generateProceduralTexture(
+        texPattern,
+        useNatColor ? 'auto' : '#ffffff',
+        texRepeat
+      )
+    : null;
+  const procBumpMap = texPattern
+    ? generateProceduralBumpTexture(texPattern, texRepeat)
+    : extraPbr?.useNoiseBump
+    ? getProceduralNoiseBumpTexture()
+    : null;
+  const procBumpScale = texPattern
+    ? (extraPbr?.bumpScale ?? texPreset?.pbr.bumpScale ?? 0.045)
+    : extraPbr?.useNoiseBump
+    ? (extraPbr?.bumpScale ?? 0.035)
+    : 0;
+
+  if (texPattern) {
+    mesh.userData.hasPerMeshTexture = true;
+    mesh.userData.originalMap = procColorMap;
+    mesh.userData.originalBumpMap = procBumpMap;
+    mesh.userData.originalBumpScale = procBumpScale;
+  }
+
+  const resolvedRough =
+    texPreset && roughness === 0.38 ? texPreset.pbr.roughness : roughness;
+  const resolvedMetal =
+    texPreset && metallic === 0.2 ? texPreset.pbr.metalness : metallic;
+  const resolvedClearcoat =
+    extraPbr?.clearcoat !== undefined
+      ? extraPbr.clearcoat
+      : texPreset
+      ? texPreset.pbr.clearcoat
+      : undefined;
+  const resolvedIor =
+    extraPbr?.ior !== undefined
+      ? extraPbr.ior
+      : texPreset
+      ? texPreset.pbr.ior
+      : undefined;
+  const resolvedTrans =
+    extraPbr?.transmission !== undefined
+      ? extraPbr.transmission
+      : texPreset?.pbr.transmission ?? 0;
+
+  const alphaVal = extraPbr?.alpha !== undefined ? Math.max(0.05, Math.min(1, extraPbr.alpha)) : 1.0;
+  const transVal = Math.max(0, Math.min(1, resolvedTrans));
+  const isTransparent = alphaVal < 0.99 || transVal > 0.05;
+  const sideMode = extraPbr?.flipNormals
+    ? THREE.BackSide
+    : isTransparent
+    ? THREE.DoubleSide
+    : THREE.FrontSide;
+
+  const stdMat = mesh.userData.originalMaterial as THREE.MeshPhysicalMaterial | undefined;
   if (stdMat) {
     stdMat.color.copy(effectiveColor);
-    stdMat.metalness = Math.max(0, Math.min(1, metallic));
-    stdMat.roughness = Math.max(0.05, Math.min(1, roughness));
+    stdMat.metalness = Math.max(0, Math.min(1, resolvedMetal));
+    stdMat.roughness = Math.max(0.03, Math.min(1, resolvedRough));
+    if (resolvedClearcoat !== undefined) {
+      stdMat.clearcoat = Math.max(0, Math.min(1, resolvedClearcoat));
+    }
+    if (extraPbr?.clearcoatRoughness !== undefined) {
+      stdMat.clearcoatRoughness = Math.max(0.01, Math.min(1, extraPbr.clearcoatRoughness));
+    }
+    if (extraPbr?.anisotropy !== undefined && 'anisotropy' in stdMat) {
+      (stdMat as any).anisotropy = Math.max(0, Math.min(1, extraPbr.anisotropy));
+    }
+    if (extraPbr?.anisotropyRotation !== undefined && 'anisotropyRotation' in stdMat) {
+      (stdMat as any).anisotropyRotation = Number(extraPbr.anisotropyRotation) || 0;
+    }
+    stdMat.transmission = transVal;
+    if (resolvedIor !== undefined) {
+      stdMat.ior = Math.max(1.0, Math.min(2.5, resolvedIor));
+    }
+    stdMat.transparent = isTransparent;
+    stdMat.opacity = isTransparent ? Math.min(alphaVal, 1.0 - transVal * 0.55) : 1.0;
+    stdMat.side = sideMode;
+
+    if (procColorMap) {
+      stdMat.map = procColorMap;
+    }
+    if (procBumpMap) {
+      stdMat.bumpMap = procBumpMap;
+      stdMat.bumpScale = procBumpScale;
+    }
+
     if (emissionColor && emissionStrength > 0) {
       stdMat.emissive.copy(emissionColor);
       stdMat.emissiveIntensity = Math.min(2.5, emissionStrength * 0.3);
@@ -901,20 +1684,148 @@ function applyMaterialToThreeMesh(
     stdMat.needsUpdate = true;
   }
 
+  const clampedRough = Math.max(0.03, Math.min(1, resolvedRough));
+  const clampedMetal = Math.max(0, Math.min(1, resolvedMetal));
+  mesh.userData.originalColorHex = `#${baseInputColor.getHexString()}`;
+  mesh.userData.baseRoughness = clampedRough;
+  mesh.userData.baseMetalness = clampedMetal;
+  if (resolvedClearcoat !== undefined) {
+    mesh.userData.baseClearcoat = Math.max(0, Math.min(1, resolvedClearcoat));
+  }
+  if (resolvedIor !== undefined) {
+    mesh.userData.baseIor = Math.max(1.0, Math.min(2.5, resolvedIor));
+  }
+
+  const eeveeMat = mesh.userData.eeveeMaterial as THREE.MeshPhysicalMaterial | undefined;
+  if (eeveeMat) {
+    eeveeMat.color.copy(effectiveColor);
+    eeveeMat.metalness = clampedMetal;
+    eeveeMat.roughness = Math.max(0.03, clampedRough * 0.92);
+    if (resolvedClearcoat !== undefined) {
+      eeveeMat.clearcoat = Math.max(0, Math.min(1, resolvedClearcoat));
+    } else {
+      eeveeMat.clearcoat = Math.max(0, (1.0 - clampedRough) * 0.25);
+    }
+    if (extraPbr?.clearcoatRoughness !== undefined) {
+      eeveeMat.clearcoatRoughness = Math.max(0.01, Math.min(1, extraPbr.clearcoatRoughness));
+    }
+    if (extraPbr?.anisotropy !== undefined && 'anisotropy' in eeveeMat) {
+      (eeveeMat as any).anisotropy = Math.max(0, Math.min(1, extraPbr.anisotropy));
+    }
+    if (extraPbr?.anisotropyRotation !== undefined && 'anisotropyRotation' in eeveeMat) {
+      (eeveeMat as any).anisotropyRotation = Number(extraPbr.anisotropyRotation) || 0;
+    }
+    eeveeMat.transmission = transVal;
+    eeveeMat.ior = Math.max(1.0, Math.min(2.5, resolvedIor ?? 1.45));
+    eeveeMat.transparent = isTransparent;
+    eeveeMat.opacity = isTransparent ? Math.min(alphaVal, 1.0 - transVal * 0.55) : 1.0;
+    eeveeMat.side = sideMode;
+    if (procColorMap) {
+      eeveeMat.map = procColorMap;
+    }
+    if (procBumpMap) {
+      eeveeMat.bumpMap = procBumpMap;
+      eeveeMat.bumpScale = procBumpScale;
+    }
+    if (emissionColor && emissionStrength > 0) {
+      eeveeMat.emissive.copy(emissionColor);
+      eeveeMat.emissiveIntensity = Math.min(2.5, emissionStrength * 0.35);
+    }
+    eeveeMat.needsUpdate = true;
+  }
+
+  const cyclesMat = mesh.userData.cyclesMaterial as THREE.MeshPhysicalMaterial | undefined;
+  if (cyclesMat) {
+    cyclesMat.color.copy(effectiveColor);
+    cyclesMat.metalness = clampedMetal;
+    cyclesMat.roughness = Math.max(0.02, Math.min(1, clampedRough * 0.78));
+    cyclesMat.clearcoat =
+      resolvedClearcoat !== undefined
+        ? Math.max(0, Math.min(1, resolvedClearcoat))
+        : Math.max(0, (1.0 - clampedRough * 0.7) * 0.55);
+    cyclesMat.clearcoatRoughness = Math.max(0.01, Math.min(1, extraPbr?.clearcoatRoughness ?? 0.06));
+    if (extraPbr?.anisotropy !== undefined && 'anisotropy' in cyclesMat) {
+      (cyclesMat as any).anisotropy = Math.max(0, Math.min(1, extraPbr.anisotropy));
+    }
+    if (extraPbr?.anisotropyRotation !== undefined && 'anisotropyRotation' in cyclesMat) {
+      (cyclesMat as any).anisotropyRotation = Number(extraPbr.anisotropyRotation) || 0;
+    }
+    cyclesMat.transmission = transVal;
+    cyclesMat.ior = Math.max(1.0, Math.min(2.5, resolvedIor ?? 1.5));
+    cyclesMat.sheenColor = effectiveColor.clone().lerp(new THREE.Color(0xffffff), 0.5);
+    cyclesMat.transparent = isTransparent;
+    cyclesMat.opacity = isTransparent ? Math.min(alphaVal, 1.0 - transVal * 0.5) : 1.0;
+    cyclesMat.side = sideMode;
+    if (procColorMap) {
+      cyclesMat.map = procColorMap;
+    }
+    if (procBumpMap) {
+      cyclesMat.bumpMap = procBumpMap;
+      cyclesMat.bumpScale = procBumpScale * 1.15;
+    }
+    if (emissionColor && emissionStrength > 0) {
+      cyclesMat.emissive.copy(emissionColor);
+      cyclesMat.emissiveIntensity = Math.min(2.8, emissionStrength * 0.38);
+    }
+    cyclesMat.needsUpdate = true;
+  }
+
   const toonMat = mesh.userData.toonMaterial as THREE.MeshToonMaterial | undefined;
   if (toonMat) {
     toonMat.color.copy(effectiveColor);
+    toonMat.transparent = isTransparent;
+    toonMat.opacity = isTransparent ? Math.min(alphaVal, 1.0 - transVal * 0.6) : 1.0;
+    toonMat.side = sideMode;
+    if (extraPbr?.customGradientMap) {
+      toonMat.gradientMap = extraPbr.customGradientMap;
+    }
+    if (procColorMap) {
+      toonMat.map = procColorMap;
+    }
+    if (procBumpMap) {
+      toonMat.bumpMap = procBumpMap;
+      toonMat.bumpScale = procBumpScale;
+    }
     if (emissionColor && emissionStrength > 0) {
       toonMat.emissive.copy(emissionColor);
-      toonMat.emissiveIntensity = Math.min(1.2, emissionStrength * 0.18);
+      toonMat.emissiveIntensity = Math.min(1.5, emissionStrength * 0.22);
     }
     toonMat.needsUpdate = true;
   }
 
-  const activeMat = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
-  if (activeMat && 'color' in activeMat) {
-    (activeMat as THREE.MeshStandardMaterial).color.copy(effectiveColor);
+  // Si el material usa Clearcoat alto, Anisotropía, Transmisión o Metálico alto (y no tiene un ColorRamp Toon explícito),
+  // activamos el MeshPhysicalMaterial en la malla para que el barniz, cristal o metal cepillado brillen en 3D
+  const wantsPhysical =
+    !extraPbr?.customGradientMap &&
+    ((resolvedClearcoat ?? 0) > 0.15 ||
+      (extraPbr?.anisotropy ?? 0) > 0.15 ||
+      transVal > 0.1 ||
+      clampedMetal > 0.72);
+
+  if (wantsPhysical && stdMat) {
+    mesh.material = stdMat;
+  } else if (extraPbr?.customGradientMap && toonMat) {
+    mesh.material = toonMat;
+  } else {
+    const activeMat = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
+    if (activeMat && 'color' in activeMat) {
+      (activeMat as THREE.MeshStandardMaterial).color.copy(effectiveColor);
+    }
   }
+
+  // Si es una malla de contorno manual (flipNormals + negro), ocultar su outlineMesh hijo para no duplicar bordes
+  if (extraPbr?.flipNormals && mesh.userData.outlineMesh) {
+    (mesh.userData.outlineMesh as THREE.Mesh).visible = false;
+  }
+
+  mesh.userData.pbrProps = {
+    ...(mesh.userData.pbrProps || {}),
+    metallic: clampedMetal,
+    roughness: clampedRough,
+    emissionColor,
+    emissionStrength,
+    ...(extraPbr || {}),
+  };
 }
 
 /**
@@ -922,45 +1833,50 @@ function applyMaterialToThreeMesh(
  * o para el Estudio Nativo (Eje Y arriba).
  */
 export function detectBlenderZUpScript(script: string): boolean {
-  // Si es uno de los presets nativos Y-Up del estudio, mantener Y-Up
+  // 1. Etiquetas explícitas de modo de ejes inyectadas por el asistente o el usuario
+  if (/#\s*COORD_MODE\s*:\s*Z_UP/i.test(script)) return true;
+  if (/#\s*COORD_MODE\s*:\s*Y_UP/i.test(script)) return false;
+
+  // 2. Presets nativos históricos Y-Up del estudio
   if (
     script.includes('Centinela Mecha Orbital') ||
     script.includes('Wyrm / Dragon Abisal articulado') ||
     script.includes('AÑADIR NUEVOS OBJETOS AL MODELO ACTUAL') ||
-    script.includes('Obelisco_Cristal') ||
-    script.includes('primitive_limb_pair_add') ||
-    script.includes('primitive_armor_plate_add') ||
-    script.includes('primitive_wing_pair_add') ||
-    script.includes('primitive_wheel_pair_add') ||
-    script.includes('primitive_arch_add') ||
-    script.includes('primitive_tree_foliage_add') ||
-    script.includes('primitive_prop_chest_add') ||
-    script.includes('bpy.ops.mesh.auto_ground()')
+    script.includes('Obelisco_Cristal')
   ) {
     return false;
   }
 
-  // Señales inequívocas de scripts Blender 4.x / 5.2 creados desde Gemini Web, ChatGPT o tutoriales
+  // 3. Señales inequívocas de scripts Blender 4.x / 5.2 (Z-Up)
   if (
-    /Principled BSDF|ShaderNode|bpy\.data\.materials|use_nodes|active_material|diffuse_color|rotation_euler|modifiers\.new|modifier_add|shade_smooth|shade_auto_smooth|bmesh|mathutils|transform_apply|mode_set|origin_set/i.test(
+    /Principled BSDF|ShaderNode|bpy\.data\.materials|use_nodes|active_material|diffuse_color|rotation_euler|modifiers\.new|modifier_add|shade_smooth|shade_auto_smooth|bmesh|mathutils|transform_apply|mode_set|origin_set|v\.co\.z/i.test(
       script
     )
   ) {
     return true;
   }
 
-  // Analizar tuplas location=(x, y, z): si varias tienen y == 0 y z > 0.35, es claramente Z-Up
-  const locMatches = [...script.matchAll(/location\s*=\s*\(\s*([-0-9.]+)\s*,\s*([-0-9.]+)\s*,\s*([-0-9.]+)\s*\)/g)];
-  if (locMatches.length >= 2) {
+  // 4. Analizar tuplas location=(x, y, z): si varias tienen z > 0.35 con y cerca de 0, es Z-Up; si y > 0.35 con z cerca de 0, es Y-Up
+  const locMatches = [
+    ...script.matchAll(/location\s*=\s*[\(\[]\s*([-0-9.]+)\s*,\s*([-0-9.]+)\s*,\s*([-0-9.]+)\s*[\)\]]/g),
+  ];
+  if (locMatches.length >= 1) {
     let zUpScore = 0;
     let yUpScore = 0;
     for (const m of locMatches) {
-      const yVal = Math.abs( parseFloat(m[2]) );
-      const zVal = Math.abs( parseFloat(m[3]) );
-      if (zVal > 0.35 && yVal < 0.25) zUpScore++;
-      if (yVal > 0.35 && zVal < 0.25) yUpScore++;
+      const yVal = parseFloat(m[2]);
+      const zVal = parseFloat(m[3]);
+      if (zVal > 0.25 && Math.abs(yVal) < 0.25) zUpScore += 2;
+      else if (zVal > Math.abs(yVal) * 1.35 && zVal > 0.4) zUpScore += 1;
+      if (yVal > 0.25 && Math.abs(zVal) < 0.25) yUpScore += 2;
+      else if (yVal > Math.abs(zVal) * 1.35 && yVal > 0.4) yUpScore += 1;
     }
-    if (zUpScore > yUpScore) return true;
+    if (zUpScore !== yUpScore) return zUpScore > yUpScore;
+  }
+
+  // 5. Por defecto en Blender 5.2 bpy, si usa bpy.ops.mesh o from_pydata sin señales de Y-Up, usar Z-Up estándar de Blender
+  if (/from_pydata|bpy\.context\.collection\.objects\.link/i.test(script)) {
+    return true;
   }
 
   return false;
@@ -1041,15 +1957,21 @@ export function stripMarkdownCodeFences(raw: string): string {
 }
 
 /**
- * Elimina docstrings multilínea `"""..."""` y `'''...'''` y comentarios `# ...` respetando strings literales.
+ * Elimina docstrings multilínea `"""..."""` y `'''...'''` y comentarios `# ...` respetando strings literales
+ * y conservando el número exacto de saltos de línea para que los números de línea coincidan 1:1 con el script original.
  */
 function stripPythonCommentsAndDocstrings(code: string): string {
-  // 1. Reemplazar docstrings triple-comilla por string vacío `""` si van tras `=`, o por nada si son comentarios
+  const preserveNewlines = (match: string, prefix: string = '') => {
+    const nlCount = (match.match(/\n/g) || []).length;
+    return prefix + '\n'.repeat(nlCount);
+  };
+
+  // 1. Reemplazar docstrings triple-comilla conservando sus saltos de línea (\n)
   const withoutDocstrings = code
-    .replace(/=\s*[rRfFbBuU]{0,2}"""[\s\S]*?"""/g, '= ""')
-    .replace(/=\s*[rRfFbBuU]{0,2}'''[\s\S]*?'''/g, "= ''")
-    .replace(/[rRfFbBuU]{0,2}"""[\s\S]*?"""/g, '')
-    .replace(/[rRfFbBuU]{0,2}'''[\s\S]*?'''/g, '');
+    .replace(/=\s*[rRfFbBuU]{0,2}"""[\s\S]*?"""/g, (m) => preserveNewlines(m, '= ""'))
+    .replace(/=\s*[rRfFbBuU]{0,2}'''[\s\S]*?'''/g, (m) => preserveNewlines(m, "= ''"))
+    .replace(/[rRfFbBuU]{0,2}"""[\s\S]*?"""/g, (m) => preserveNewlines(m, ''))
+    .replace(/[rRfFbBuU]{0,2}'''[\s\S]*?'''/g, (m) => preserveNewlines(m, ''));
 
   // 2. Eliminar comentarios # fuera de strings
   return withoutDocstrings
@@ -1166,12 +2088,14 @@ function convertPythonFStringsAndRawStrings(code: string): string {
 
 /**
  * Une sentencias Python que continúan en múltiples líneas dentro de paréntesis `()`, corchetes `[]` o llaves `{}`
- * o que terminan con barra invertida `\`. También separa sentencias en una misma línea unidas con `;`.
+ * o que terminan con barra invertida `\`. También separa sentencias en una misma línea unidas con `;`,
+ * etiquetando cada línea resultante con un marcador de línea para reportar la línea exacta en caso de fallo.
  */
 function joinMultilineBracketStatements(code: string): string {
   const rawLines = code.split('\n');
-  const outLines: string[] = [];
+  const outEntries: { text: string; pyLine: number }[] = [];
   let buffer = '';
+  let bufferStartLine = 1;
   let depth = 0;
   let inStr: string | null = null;
 
@@ -1189,6 +2113,7 @@ function joinMultilineBracketStatements(code: string): string {
 
     if (depth === 0 && !buffer) {
       buffer = line;
+      bufferStartLine = i + 1;
     } else {
       buffer += ' ' + trimmed;
     }
@@ -1209,31 +2134,104 @@ function joinMultilineBracketStatements(code: string): string {
     }
 
     if (depth === 0 && !hasExplicitBackslash) {
-      outLines.push(buffer);
+      outEntries.push({ text: buffer, pyLine: bufferStartLine });
       buffer = '';
     }
   }
 
   if (buffer.trim()) {
-    outLines.push(buffer);
+    outEntries.push({ text: buffer, pyLine: bufferStartLine });
   }
 
-  // Primero expandir suites de una línea (`if cond: a = 1; b = 2`) y luego dividir `;` conservando la indentación
+  // Primero expandir suites de una línea (`if cond: a = 1; b = 2`) y luego dividir `;` conservando la indentación y el marcador de línea
   const expandedLines: string[] = [];
-  for (const line of outLines) {
-    const suiteExpanded = expandSingleLineColonSuite(line);
+  for (const entry of outEntries) {
+    const suiteExpanded = expandSingleLineColonSuite(entry.text);
     for (const sLine of suiteExpanded) {
       const sIndent = sLine.match(/^\s*/)?.[0] ?? '';
       const statements = splitTopLevelChar(sLine.trim(), ';');
       for (const stmt of statements) {
         if (!stmt.trim()) continue;
         const nestedSuite = expandSingleLineColonSuite(sIndent + stmt.trim());
-        expandedLines.push(...nestedSuite);
+        for (const nLine of nestedSuite) {
+          expandedLines.push(`/*@L:${entry.pyLine}@*/${nLine}`);
+        }
       }
     }
   }
 
   return expandedLines.join('\n');
+}
+
+/**
+ * Convierte expresiones `lambda a, b=1: cuerpo` de Python en funciones flecha JS `((a, b=1) => (cuerpo))`
+ * respetando paréntesis, corchetes, llaves y cadenas anidadas dentro del cuerpo del lambda.
+ */
+function convertPythonLambdas(code: string): string {
+  let out = '';
+  let i = 0;
+  let inStr: string | null = null;
+
+  while (i < code.length) {
+    const ch = code[i];
+    if (inStr) {
+      out += ch;
+      if (ch === inStr && code[i - 1] !== '\\') inStr = null;
+      i++;
+      continue;
+    }
+
+    if (ch === '"' || ch === "'" || ch === '`') {
+      inStr = ch;
+      out += ch;
+      i++;
+      continue;
+    }
+
+    const prevChar = i > 0 ? code[i - 1] : '';
+    if (!/[a-zA-Z0-9_$]/.test(prevChar)) {
+      const sub = code.slice(i);
+      const lambdaMatch = sub.match(/^lambda(?:\s+([a-zA-Z0-9_,\s=*]+?))?\s*:/);
+      if (lambdaMatch) {
+        const rawParams = (lambdaMatch[1] || '').trim();
+        const bodyStart = i + lambdaMatch[0].length;
+        let cursor = bodyStart;
+        let depth = 0;
+        let subStr: string | null = null;
+
+        while (cursor < code.length) {
+          const c = code[cursor];
+          if (subStr) {
+            if (c === subStr && code[cursor - 1] !== '\\') subStr = null;
+          } else if (c === '"' || c === "'" || c === '`') {
+            subStr = c;
+          } else if (c === '(' || c === '[' || c === '{') {
+            depth++;
+          } else if (c === ')' || c === ']' || c === '}') {
+            if (depth > 0) {
+              depth--;
+            } else {
+              break;
+            }
+          } else if (depth === 0 && (c === ',' || c === ';' || c === '\n')) {
+            break;
+          }
+          cursor++;
+        }
+
+        const rawBody = code.slice(bodyStart, cursor).trim();
+        const transformedBody = convertPythonLambdas(rawBody);
+        out += `((${rawParams}) => (${transformedBody}))`;
+        i = cursor;
+        continue;
+      }
+    }
+
+    out += ch;
+    i++;
+  }
+
+  return out;
 }
 
 function splitTopLevelChar(str: string, sepChar: string): string[] {
@@ -1409,14 +2407,17 @@ function chIsOpen(c: string): boolean {
 }
 
 function transformAllKeywordFunctionCalls(code: string): string {
-  // No transformar la cabecera de `def nombre_funcion(...):`
+  // No transformar la cabecera de `def nombre_funcion(...):` (respetando el marcador /*@L:N@*/)
   return code
     .split('\n')
     .map((line) => {
-      if (/^\s*def\s+[a-zA-Z_]\w*\s*\(/.test(line)) {
+      const markerMatch = line.match(/^(\/\*@L:\d+@\*\/)/);
+      const marker = markerMatch ? markerMatch[1] : '';
+      const rest = marker ? line.slice(marker.length) : line;
+      if (/^\s*def\s+[a-zA-Z_]\w*\s*\(/.test(rest)) {
         return line;
       }
-      return transformKeywordCallsInExpression(line);
+      return marker + transformKeywordCallsInExpression(rest);
     })
     .join('\n');
 }
@@ -1886,8 +2887,12 @@ function rewritePythonSyntaxInLine(line: string, isForOrCompHeader: boolean = fa
       // Negación unaria antes de exponenciación `-x ** 2` -> `-(x ** 2)` (evita SyntaxError en JS)
       t = t.replace(/(^|[=(\[,:;+\-*/%&|^~<>?\s])-\s*([a-zA-Z0-9_.()\[\]]+)\s*\*\*\s*([a-zA-Z0-9_.()\[\]+-]+)/g, '$1-($2 ** $3)');
 
-      // Repetición de listas estilo Python: `[True] * n` o `[0, 0] * 4` -> `bpy._repeatList([True], n)`
-      t = t.replace(/(\[[^\[\]]+\])\s*\*\s*([a-zA-Z0-9_.()\[\]]+)/g, 'bpy._repeatList($1, $2)');
+      // Repetición de listas literales estilo Python: `[True] * n` o `[0, 0] * 4` -> `bpy._repeatList([True], n)`
+      // Importante: exigir que `[` NO vaya precedido de identificador, `)` ni `]` para no alterar `verts[0] * 2.0`
+      t = t.replace(
+        /(^|[^a-zA-Z0-9_.\)\]])(\[[^\[\]]+\])\s*\*\s*([a-zA-Z0-9_.()\[\]]+)/g,
+        '$1bpy._repeatList($2, $3)'
+      );
 
       // Operaciones vectoriales `(a - b).length`, `(a - b).normalized()`, `(a + b).normalized()`
       t = t.replace(
@@ -1899,18 +2904,14 @@ function rewritePythonSyntaxInLine(line: string, isForOrCompHeader: boolean = fa
         'bpy._add($1, $2).$3'
       );
 
-      // Multiplicación de matrices con operador `@` de Blender / Python: `mat @ vec`
-      while (/([a-zA-Z0-9_.[\]()]+)\s*@\s*([a-zA-Z0-9_.[\]()]+)/.test(t)) {
-        t = t.replace(/([a-zA-Z0-9_.[\]()]+)\s*@\s*([a-zA-Z0-9_.[\]()]+)/, 'bpy._matmul($1, $2)');
-      }
-      // Slicing con paso: `arr[::-1]` -> `[...arr].reverse()`, `arr[s:e:step]` -> `bpy._slice(arr, s, e, step)`
+      // Slicing con paso: `arr[::-1]` -> `arr._pySlice(null, null, -1)`, `arr[s:e:step]` -> `arr._pySlice(s, e, step)`
       t = t.replace(
         /([a-zA-Z0-9_)\]])\[\s*([^:\[\]]*)\s*:\s*([^:\[\]]*)\s*:\s*([^:\[\]]*)\s*\]/g,
         (_, obj, start, end, step) => {
           const s = start.trim() ? start.trim() : 'null';
           const e = end.trim() ? end.trim() : 'null';
           const st = step.trim() ? step.trim() : '1';
-          return `bpy._slice(${obj}, ${s}, ${e}, ${st})`;
+          return `${obj}._pySlice(${s}, ${e}, ${st})`;
         }
       );
       // Slicing de listas Python: `arr[:3]` -> `arr.slice(0, 3)`, `arr[1:]` -> `arr.slice(1)`
@@ -1931,12 +2932,6 @@ function rewritePythonSyntaxInLine(line: string, isForOrCompHeader: boolean = fa
         /\blambda\s+([a-zA-Z0-9_,\s]*?)\s*:\s*([^,)\]\n]+)/g,
         '(($1) => ($2))'
       );
-      // Métodos de diccionarios Python: `.items()`, `.values()`, `.keys()`, `.get(...)`, `.setdefault(...)`
-      t = t.replace(/([a-zA-Z0-9_.\[\]()]+)\.items\(\)/g, 'bpy._items($1)');
-      t = t.replace(/([a-zA-Z0-9_.\[\]()]+)\.values\(\)/g, 'bpy._values($1)');
-      t = t.replace(/([a-zA-Z0-9_.\[\]()]+)\.keys\(\)/g, 'bpy._keys($1)');
-      t = t.replace(/([a-zA-Z0-9_.\[\]()]+)\.get\(/g, 'bpy._get($1, ');
-      t = t.replace(/([a-zA-Z0-9_.\[\]()]+)\.setdefault\(/g, 'bpy._setdefault($1, ');
       // Booleanos, None y operadores lógicos
       t = t
         .replace(/\bTrue\b/g, 'true')
@@ -1951,15 +2946,75 @@ function rewritePythonSyntaxInLine(line: string, isForOrCompHeader: boolean = fa
     })
     .join('');
 
-  // 2. Resolver división entera `a // b` fuera de strings extrayendo el operando completo (ej. `len(verts) // 2`)
-  const afterFloorDiv = rewritePythonFloorDivisions(processed);
+  // 2. Resolver métodos de diccionario (.items(), .values(), .keys(), .get(...), .setdefault(...))
+  // y multiplicación matricial `@` sobre la línea completa (soportando strings entre corchetes como nodes["Principled BSDF"].inputs.get(...))
+  const afterDictAndMatmul = rewritePythonDictMethodsAndMatmul(processed);
+
+  // 3. Resolver división entera `a // b` fuera de strings extrayendo el operando completo (ej. `len(verts) // 2`)
+  const afterFloorDiv = rewritePythonFloorDivisions(afterDictAndMatmul);
 
   if (isForOrCompHeader) {
     return afterFloorDiv;
   }
 
-  // 3. Resolver `x not in y` y `x in y` fuera de strings
+  // 4. Resolver `x not in y` y `x in y` fuera de strings
   return rewritePythonInExpressions(afterFloorDiv);
+}
+
+function rewritePythonDictMethodsAndMatmul(line: string): string {
+  let result = line;
+
+  // 1. Métodos sin argumentos: .items(), .values(), .keys()
+  const zeroArgMethods: Array<{ pattern: RegExp; helper: string }> = [
+    { pattern: /^\.items\s*\(\s*\)/, helper: 'bpy._items' },
+    { pattern: /^\.values\s*\(\s*\)/, helper: 'bpy._values' },
+    { pattern: /^\.keys\s*\(\s*\)/, helper: 'bpy._keys' },
+  ];
+  for (const { pattern, helper } of zeroArgMethods) {
+    let guard = 30;
+    while (guard-- > 0) {
+      const found = findOutsideStrings(result, pattern);
+      if (!found) break;
+      const beforeStr = result.slice(0, found.index);
+      const afterStr = result.slice(found.index + found.length);
+      const left = extractBalancedOperandBackward(beforeStr, beforeStr.length - 1);
+      if (!left.operand) break;
+      result = `${beforeStr.slice(0, left.startIdx)}${helper}(${left.operand})${afterStr}`;
+    }
+  }
+
+  // 2. Métodos con argumentos: .get(...) y .setdefault(...)
+  const callMethods: Array<{ pattern: RegExp; helper: string }> = [
+    { pattern: /^\.get\s*\(/, helper: 'bpy._get' },
+    { pattern: /^\.setdefault\s*\(/, helper: 'bpy._setdefault' },
+  ];
+  for (const { pattern, helper } of callMethods) {
+    let guard = 40;
+    while (guard-- > 0) {
+      const found = findOutsideStrings(result, pattern);
+      if (!found) break;
+      const beforeStr = result.slice(0, found.index);
+      const left = extractBalancedOperandBackward(beforeStr, beforeStr.length - 1);
+      if (!left.operand) break;
+      const afterOpenParen = result.slice(found.index + found.length);
+      result = `${beforeStr.slice(0, left.startIdx)}${helper}(${left.operand}, ${afterOpenParen}`;
+    }
+  }
+
+  // 3. Operador `@` de multiplicación de matrices/vectores (`Matrix.Rotation(0.5, 4, 'Z') @ vec`)
+  let matmulGuard = 30;
+  while (matmulGuard-- > 0) {
+    const found = findOutsideStrings(result, /^\s*@\s*/);
+    if (!found || found.index === 0) break;
+    const beforeStr = result.slice(0, found.index);
+    const afterStr = result.slice(found.index + found.length);
+    const left = extractBalancedOperandBackward(beforeStr, beforeStr.length - 1);
+    const right = extractBalancedOperandForward(afterStr, 0);
+    if (!left.operand || !right.operand) break;
+    result = `${beforeStr.slice(0, left.startIdx)}bpy._matmul(${left.operand}, ${right.operand})${afterStr.slice(right.endIdx)}`;
+  }
+
+  return result;
 }
 
 function findOutsideStrings(str: string, regex: RegExp): { index: number; length: number; match: RegExpExecArray } | null {
@@ -2375,7 +3430,41 @@ export async function executeBlenderPythonScript(
   modelWrapper: THREE.Object3D,
   callbacks?: {
     onTextureChange?: (texName: TexturePatternType) => void;
+    onTextureSettingsChange?: (opts: {
+      activeTexture?: TexturePatternType;
+      repeatScale?: number;
+      bumpIntensity?: number;
+      useNaturalColor?: boolean;
+    }) => void;
     onColorChange?: (colorHex: string) => void;
+    onRenderEngineChange?: (engine: 'eevee' | 'cycles' | 'cel' | 'matcap' | 'normals' | 'original') => void;
+    onRenderSettingsChange?: (partial: {
+      normalSmoothing?: number;
+      outlineThickness?: number;
+      outlineOpacity?: number;
+      ssaoIntensity?: number;
+      bgColor?: string;
+      autoRotate?: boolean;
+      autoRotateSpeed?: number;
+      aaMode?: 'SMAA' | 'FXAA';
+      matcapPreset?: MatcapPresetId;
+      wireframe?: boolean;
+      showPedestalGrid?: boolean;
+      lightIntensity?: number;
+      lightAngle?: number;
+      followCameraLight?: boolean;
+      eeveeBloomIntensity?: number;
+      eeveeEnvIntensity?: number;
+      cyclesSamples?: number;
+      cyclesClearcoat?: number;
+      cyclesRoughnessFactor?: number;
+      cyclesIor?: number;
+      cyclesGiBounceBoost?: number;
+      cyclesProgressiveAccum?: boolean;
+    }) => void;
+    onCameraPresetChange?: (preset: 'hero' | 'front' | 'closeup' | 'macro' | 'side' | 'top') => void;
+    onZoomChange?: (percent: number) => void;
+    onFrameModel?: (margin?: number) => void;
     outlineThickness?: number;
     outlineOpacity?: number;
     normalSmoothing?: number;
@@ -2409,7 +3498,21 @@ export async function executeBlenderPythonScript(
   const outOpac = callbacks?.outlineOpacity ?? 0.9;
   const normSmooth = callbacks?.normalSmoothing ?? 0.92;
 
-  const targetParent = modelWrapper.children[0] || modelWrapper;
+  let rootGroup = modelWrapper.children.find(
+    (c) => (c as THREE.Group).isGroup && !(c as THREE.Mesh).isMesh
+  ) as THREE.Group | undefined;
+  if (!rootGroup) {
+    rootGroup = new THREE.Group();
+    rootGroup.name = 'Blender_Scene_Root';
+    rootGroup.position.set(0, -1.35, 0);
+    while (modelWrapper.children.length > 0) {
+      const child = modelWrapper.children[0];
+      modelWrapper.remove(child);
+      rootGroup.add(child);
+    }
+    modelWrapper.add(rootGroup);
+  }
+  const targetParent: THREE.Object3D = rootGroup;
 
   // Conversores de vectores Blender <-> Three.js según modo Z-Up / Y-Up
   const convertLocToThree = (loc?: any): [number, number, number] => {
@@ -2428,13 +3531,19 @@ export async function executeBlenderPythonScript(
     return isZUp ? [rx, rz, -ry] : [rx, ry, rz];
   };
 
+  // En modo Z-Up, la rotación Euler extrínseca XYZ de Blender (R_z * R_y * R_x) conjugada por el cambio
+  // de base Z-Up -> Y-Up (X'=X, Y'=Z, Z'=-Y) equivale exactamente al orden intrínseco 'YZX' en Three.js.
+  const applyRotOrderForMode = (obj3d: THREE.Object3D, alreadyThreeSpace = false) => {
+    obj3d.rotation.order = isZUp && !alreadyThreeSpace ? 'YZX' : 'XYZ';
+  };
+
   const convertScaleToThree = (sc?: any): [number, number, number] => {
     if (sc === undefined || sc === null) return [1, 1, 1];
     if (typeof sc === 'number') return [sc || 1, sc || 1, sc || 1];
     const sx = Number(sc[0] ?? sc.x) || 1;
     const sy = Number(sc[1] ?? sc.y) || 1;
     const sz = Number(sc[2] ?? sc.z) || 1;
-    return isZUp ? [sx, sz, sy] : [sx, sz, sy];
+    return isZUp ? [sx, sz, sy] : [sx, sy, sz];
   };
 
   class VertexProxy {
@@ -2601,18 +3710,35 @@ export async function executeBlenderPythonScript(
   collectMeshes();
 
   // ==========================================================================
-  // SISTEMA DE MATERIALES Y NODOS PRINCIPLED BSDF DE BLENDER 5.2
+  // SISTEMA DE MATERIALES Y NODOS PRINCIPLED BSDF + CELSHADE DE BLENDER 5.2
   // ==========================================================================
   interface BlenderMaterialInstance {
     _isBlenderMaterial: true;
     name: string;
     use_nodes: boolean;
+    use_backface_culling: boolean;
+    blend_method: string;
     diffuse_color: number[];
     metallic: number;
     roughness: number;
+    texture?: string;
     _baseColor: THREE.Color;
     _emissionColor: THREE.Color | null;
     _emissionStrength: number;
+    _clearcoat: number;
+    _clearcoatRoughness: number;
+    _anisotropy: number;
+    _anisotropyRotation: number;
+    _transmission: number;
+    _ior: number;
+    _alpha: number;
+    _useNoiseBump: boolean;
+    _bumpScale: number;
+    _flipNormals: boolean;
+    _customGradientMap: THREE.DataTexture | null;
+    _texturePattern: TexturePatternType;
+    _textureRepeat: number;
+    _textureNaturalColor: boolean;
     _linkedMeshes: Set<THREE.Mesh>;
     _sync: () => void;
     node_tree: {
@@ -2623,19 +3749,120 @@ export async function executeBlenderPythonScript(
 
   const materialsStore: BlenderMaterialInstance[] = [];
 
+  const buildColorRampGradientTexture = (
+    elements: { position: number; color: number[] }[],
+    interpolation: string = 'CONSTANT'
+  ): { tex: THREE.DataTexture; mainColor: THREE.Color | null } => {
+    const sorted = [...elements].sort((a, b) => Number(a.position) - Number(b.position));
+    const width = 64;
+    const data = new Uint8Array(width * 4);
+    let brightestColor: THREE.Color | null = null;
+    let maxLum = -1;
+
+    for (const el of sorted) {
+      const c = parsePythonColor(el.color, '#ffffff');
+      const lum = c.r * 0.299 + c.g * 0.587 + c.b * 0.114;
+      if (lum > maxLum) {
+        maxLum = lum;
+        brightestColor = c;
+      }
+    }
+
+    for (let i = 0; i < width; i++) {
+      const t = i / (width - 1);
+      let chosen = sorted[0]?.color || [0.3, 0.3, 0.3, 1];
+
+      if (String(interpolation).toUpperCase() === 'CONSTANT') {
+        for (const el of sorted) {
+          if (t >= Number(el.position)) {
+            chosen = el.color;
+          }
+        }
+      } else {
+        let prev = sorted[0] || { position: 0, color: [0, 0, 0, 1] };
+        let next = sorted[sorted.length - 1] || { position: 1, color: [1, 1, 1, 1] };
+        for (let k = 0; k < sorted.length - 1; k++) {
+          if (t >= Number(sorted[k].position) && t <= Number(sorted[k + 1].position)) {
+            prev = sorted[k];
+            next = sorted[k + 1];
+            break;
+          }
+        }
+        const span = Math.max(0.0001, Number(next.position) - Number(prev.position));
+        const localT = Math.max(0, Math.min(1, (t - Number(prev.position)) / span));
+        chosen = [
+          (Number(prev.color[0]) || 0) * (1 - localT) + (Number(next.color[0]) || 0) * localT,
+          (Number(prev.color[1]) || 0) * (1 - localT) + (Number(next.color[1]) || 0) * localT,
+          (Number(prev.color[2]) || 0) * (1 - localT) + (Number(next.color[2]) || 0) * localT,
+          1,
+        ];
+      }
+
+      const col = parsePythonColor(chosen, '#ffffff');
+      const lumByte = Math.max(35, Math.min(255, Math.round((col.r * 0.3 + col.g * 0.59 + col.b * 0.11) * 255)));
+      data[i * 4] = lumByte;
+      data[i * 4 + 1] = lumByte;
+      data[i * 4 + 2] = lumByte;
+      data[i * 4 + 3] = 255;
+    }
+
+    const tex = new THREE.DataTexture(data, width, 1, THREE.RGBAFormat);
+    tex.minFilter = String(interpolation).toUpperCase() === 'CONSTANT' ? THREE.NearestFilter : THREE.LinearFilter;
+    tex.magFilter = String(interpolation).toUpperCase() === 'CONSTANT' ? THREE.NearestFilter : THREE.LinearFilter;
+    tex.needsUpdate = true;
+    return { tex, mainColor: brightestColor };
+  };
+
   const createBlenderMaterial = (matName: string = 'Material'): BlenderMaterialInstance => {
+    // Inferencia automática de textura procedural si el nombre del material indica piedra, madera, mármol, ladrillo, agua, etc.
+    const inferredTex = resolveTexturePatternId(matName);
+    const presetBump = inferredTex !== 'none' ? getTexturePresetInfo(inferredTex).pbr.bumpScale : 0.035;
+
     const matObj: BlenderMaterialInstance = {
       _isBlenderMaterial: true,
       name: matName,
       use_nodes: true,
+      use_backface_culling: false,
+      blend_method: 'OPAQUE',
       diffuse_color: [0.8, 0.8, 0.8, 1.0],
       metallic: 0.2,
       roughness: 0.38,
       _baseColor: new THREE.Color('#e11d48'),
       _emissionColor: null,
       _emissionStrength: 0,
+      _clearcoat: 0,
+      _clearcoatRoughness: 0.06,
+      _anisotropy: 0,
+      _anisotropyRotation: 0,
+      _transmission: 0,
+      _ior: 1.45,
+      _alpha: 1.0,
+      _useNoiseBump: false,
+      _bumpScale: presetBump,
+      _flipNormals: false,
+      _customGradientMap: null,
+      _texturePattern: inferredTex,
+      _textureRepeat: 2,
+      _textureNaturalColor: false,
       _linkedMeshes: new Set<THREE.Mesh>(),
       _sync() {
+        const extraPbr: ExtendedPBRMaterialProps = {
+          clearcoat: this._clearcoat,
+          clearcoatRoughness: this._clearcoatRoughness,
+          anisotropy: this._anisotropy,
+          anisotropyRotation: this._anisotropyRotation,
+          transmission: this._transmission,
+          ior: this._ior,
+          alpha: this._alpha,
+          useNoiseBump: this._useNoiseBump,
+          bumpScale: this._bumpScale,
+          useBackfaceCulling: this.use_backface_culling,
+          flipNormals: this._flipNormals || this.use_backface_culling,
+          customGradientMap: this._customGradientMap,
+          texturePattern: this._texturePattern,
+          textureRepeat: this._textureRepeat,
+          textureNaturalColor: this._textureNaturalColor,
+        };
         this._linkedMeshes.forEach((m) => {
           applyMaterialToThreeMesh(
             m,
@@ -2643,29 +3870,73 @@ export async function executeBlenderPythonScript(
             this.metallic,
             this.roughness,
             this._emissionColor,
-            this._emissionStrength
+            this._emissionStrength,
+            extraPbr
           );
         });
       },
       node_tree: {
         nodes: null,
         links: {
-          new: () => ({}),
+          new: (...linkArgs: any[]) => {
+            for (const arg of linkArgs) {
+              const sName = String(arg?.name || '').toLowerCase();
+              const nType = String(arg?._nodeType || '').toLowerCase();
+              if (
+                sName.includes('normal') ||
+                sName.includes('height') ||
+                nType.includes('bump') ||
+                nType.includes('texnoise') ||
+                nType.includes('voronoi')
+              ) {
+                matObj._useNoiseBump = true;
+              }
+              if (nType.includes('texbrick')) {
+                matObj._texturePattern = 'brick_mudejar';
+              } else if (nType.includes('texchecker')) {
+                matObj._texturePattern = 'andalusi_tiles';
+              } else if (nType.includes('texwave')) {
+                if (matObj._texturePattern === 'none') matObj._texturePattern = 'marble_carrara';
+              } else if (nType.includes('texmagic')) {
+                matObj._texturePattern = 'stained_glass';
+              }
+            }
+            matObj._sync();
+            return {};
+          },
           clear: () => {},
         },
       },
     };
 
-    const createSocketProxy = (socketKey: string) => {
+    const createSocketProxy = (socketKey: string, ownerNodeType: string = 'BSDF_PRINCIPLED') => {
       let _val: any = socketKey === 'Base Color' ? [0.8, 0.8, 0.8, 1.0] : 0.0;
       return {
         name: socketKey,
+        _nodeType: ownerNodeType,
         get default_value() {
           return _val;
         },
         set default_value(v: any) {
           _val = v;
           const kLower = socketKey.toLowerCase();
+          const nLower = ownerNodeType.toLowerCase();
+
+          if (nLower.includes('bump')) {
+            if (kLower === 'strength' || kLower === 'distance' || kLower === '0' || kLower === '1') {
+              matObj._useNoiseBump = true;
+              matObj._bumpScale = Math.max(0.005, Math.min(0.25, Number(v) * 0.08 || 0.035));
+              matObj._sync();
+              return;
+            }
+          }
+
+          if (nLower.includes('texnoise') || nLower.includes('voronoi')) {
+            matObj._useNoiseBump = true;
+            matObj._sync();
+            return;
+          }
+
           if (
             kLower === 'base color' ||
             kLower === 'color' ||
@@ -2673,6 +3944,9 @@ export async function executeBlenderPythonScript(
             socketKey === 'ShaderSocket0'
           ) {
             matObj._baseColor = parsePythonColor(v, '#38bdf8');
+            if (Array.isArray(v) && v.length >= 4 && typeof v[3] === 'number' && v[3] < 0.99) {
+              matObj._alpha = v[3];
+            }
             matObj._sync();
           } else if (kLower === 'metallic' || kLower === '4' || kLower === '1') {
             if (typeof v === 'number') {
@@ -2684,6 +3958,27 @@ export async function executeBlenderPythonScript(
               matObj.roughness = v;
               matObj._sync();
             }
+          } else if (kLower === 'coat weight' || kLower === 'clearcoat') {
+            matObj._clearcoat = Math.max(0, Math.min(1, Number(v) || 0));
+            matObj._sync();
+          } else if (kLower === 'coat roughness' || kLower === 'clearcoat roughness') {
+            matObj._clearcoatRoughness = Math.max(0.01, Math.min(1, Number(v) || 0.05));
+            matObj._sync();
+          } else if (kLower === 'anisotropic' || kLower === 'anisotropy') {
+            matObj._anisotropy = Math.max(0, Math.min(1, Number(v) || 0));
+            matObj._sync();
+          } else if (kLower === 'anisotropic rotation') {
+            matObj._anisotropyRotation = Number(v) || 0;
+            matObj._sync();
+          } else if (kLower === 'transmission weight' || kLower === 'transmission') {
+            matObj._transmission = Math.max(0, Math.min(1, Number(v) || 0));
+            matObj._sync();
+          } else if (kLower === 'ior') {
+            matObj._ior = Math.max(1.0, Math.min(2.5, Number(v) || 1.45));
+            matObj._sync();
+          } else if (kLower === 'alpha') {
+            matObj._alpha = Math.max(0.02, Math.min(1, Number(v) ?? 1));
+            matObj._sync();
           } else if (kLower.includes('emission') && !kLower.includes('strength')) {
             matObj._emissionColor = parsePythonColor(v, '#38bdf8');
             if (matObj._emissionStrength === 0) matObj._emissionStrength = 1.5;
@@ -2691,65 +3986,147 @@ export async function executeBlenderPythonScript(
           } else if (kLower === 'emission strength' || kLower === 'strength') {
             matObj._emissionStrength = Number(v) || 0;
             matObj._sync();
+          } else if (kLower === 'texture' || kLower === 'pattern' || kLower === 'textura') {
+            matObj._texturePattern = resolveTexturePatternId(String(v));
+            matObj._sync();
+          } else if (kLower === 'repeat' || kLower === 'scale' || kLower === 'tiling') {
+            matObj._textureRepeat = Math.max(1, Math.min(16, Number(v) || 2));
+            matObj._sync();
           }
         },
       };
     };
 
-    const socketsMap: Record<string, any> = {};
-    const inputsProxy = new Proxy(socketsMap, {
-      get(target, prop) {
-        if (typeof prop === 'string') {
-          if (prop === 'get') {
-            return (name: string) => {
-              if (!target[name]) target[name] = createSocketProxy(name);
-              return target[name];
-            };
-          }
-          if (!target[prop]) {
-            target[prop] = createSocketProxy(prop);
-          }
-          return target[prop];
-        }
-        return Reflect.get(target, prop);
-      },
-      has() {
-        return true; // Para que `if "Emission Color" in bsdf.inputs:` siempre sea True en Blender 5.2
-      },
-    });
+    const createShaderNode = (nodeName: string, nodeType: string = 'ShaderNodeBsdfPrincipled') => {
+      const nLower = nodeType.toLowerCase();
+      if (nLower.includes('texnoise') || nLower.includes('bump') || nLower.includes('voronoi')) {
+        matObj._useNoiseBump = true;
+        matObj._sync();
+      } else if (nLower.includes('texbrick')) {
+        matObj._texturePattern = 'brick_mudejar';
+        matObj._sync();
+      } else if (nLower.includes('texchecker')) {
+        matObj._texturePattern = 'andalusi_tiles';
+        matObj._sync();
+      } else if (nLower.includes('texmagic')) {
+        matObj._texturePattern = 'stained_glass';
+        matObj._sync();
+      }
 
-    const createShaderNode = (nodeName: string, nodeType: string = 'ShaderNodeBsdfPrincipled') => ({
-      name: nodeName,
-      type: nodeType,
-      location: [0, 0],
-      inputs: inputsProxy,
-      outputs: new Proxy(
-        {},
-        {
-          get: () => ({ default_value: [1, 1, 1, 1] }),
+      const nodeSocketsMap: Record<string, any> = {};
+      const nodeInputsProxy = new Proxy(nodeSocketsMap, {
+        get(target, prop) {
+          if (typeof prop === 'string') {
+            if (prop === 'get') {
+              return (name: string) => {
+                if (!target[name]) target[name] = createSocketProxy(name, nodeType);
+                return target[name];
+              };
+            }
+            if (!target[prop]) {
+              target[prop] = createSocketProxy(prop, nodeType);
+            }
+            return target[prop];
+          }
+          return Reflect.get(target, prop);
+        },
+        has() {
+          return true;
+        },
+      });
+
+      const rampElementsRaw: { position: number; color: number[] }[] = [
+        { position: 0.0, color: [0.08, 0.08, 0.12, 1.0] },
+        { position: 0.5, color: [0.85, 0.85, 0.9, 1.0] },
+      ];
+      let rampInterpolation = 'LINEAR';
+
+      const syncRampToMaterial = () => {
+        if (
+          nLower.includes('valtorgb') ||
+          nLower.includes('colorramp') ||
+          nodeName.toLowerCase().includes('colorramp')
+        ) {
+          const { tex, mainColor } = buildColorRampGradientTexture(rampElementsRaw, rampInterpolation);
+          matObj._customGradientMap = tex;
+          if (mainColor) {
+            matObj._baseColor = mainColor;
+          }
+          matObj._sync();
         }
-      ),
-      color_ramp: {
-        elements: new Proxy(
-          [
-            { position: 0, color: [0, 0, 0, 1] },
-            { position: 1, color: [1, 1, 1, 1] },
-          ],
-          {
+      };
+
+      const wrapRampElement = (el: { position: number; color: number[] }) =>
+        new Proxy(el, {
+          set(t, p, val) {
+            Reflect.set(t, p, val);
+            syncRampToMaterial();
+            return true;
+          },
+        });
+
+      const wrappedElements = rampElementsRaw.map(wrapRampElement);
+
+      const colorRampProxy = new Proxy(
+        {
+          get interpolation() {
+            return rampInterpolation;
+          },
+          set interpolation(v: string) {
+            rampInterpolation = String(v || 'CONSTANT');
+            syncRampToMaterial();
+          },
+          elements: new Proxy(wrappedElements, {
             get(arr, p) {
               if (p === 'new') {
                 return (pos: number) => {
-                  const el = { position: pos, color: [1, 1, 1, 1] };
-                  arr.push(el);
-                  return el;
+                  const rawEl = { position: Number(pos) || 0, color: [1, 1, 1, 1] };
+                  rampElementsRaw.push(rawEl);
+                  const wrapped = wrapRampElement(rawEl);
+                  arr.push(wrapped);
+                  syncRampToMaterial();
+                  return wrapped;
+                };
+              }
+              if (p === 'remove') {
+                return (el: any) => {
+                  const idx = arr.indexOf(el);
+                  if (idx !== -1) {
+                    arr.splice(idx, 1);
+                    rampElementsRaw.splice(idx, 1);
+                    syncRampToMaterial();
+                  }
                 };
               }
               return Reflect.get(arr, p);
             },
+          }),
+        },
+        {}
+      );
+
+      if (nLower.includes('valtorgb') || nLower.includes('shadertorgb')) {
+        syncRampToMaterial();
+      }
+
+      return {
+        name: nodeName,
+        type: nodeType,
+        location: [0, 0],
+        inputs: nodeInputsProxy,
+        outputs: new Proxy(
+          {},
+          {
+            get: (_t, outProp) => ({
+              name: String(outProp),
+              _nodeType: nodeType,
+              default_value: [1, 1, 1, 1],
+            }),
           }
         ),
-      },
-    });
+        color_ramp: colorRampProxy,
+      };
+    };
 
     const nodesDict: Record<string, any> = {
       'Principled BSDF': createShaderNode('Principled BSDF', 'BSDF_PRINCIPLED'),
@@ -2765,8 +4142,12 @@ export async function executeBlenderPythonScript(
         if (prop === 'new') {
           return (...rawArgs: unknown[]) => {
             const { type } = extractPyArgs(rawArgs, ['type'], { type: 'ShaderNodeBsdfPrincipled' });
-            const node = createShaderNode(String(type), String(type));
-            target[String(type)] = node;
+            const tStr = String(type);
+            if (tStr.toLowerCase().includes('principled')) {
+              return target['Principled BSDF'];
+            }
+            const node = createShaderNode(tStr, tStr);
+            target[tStr] = node;
             return node;
           };
         }
@@ -2778,7 +4159,7 @@ export async function executeBlenderPythonScript(
         }
         if (typeof prop === 'string') {
           if (!target[prop]) {
-            target[prop] = createShaderNode(prop);
+            target[prop] = createShaderNode(prop, prop);
           }
           return target[prop];
         }
@@ -2791,6 +4172,9 @@ export async function executeBlenderPythonScript(
         if (prop === 'diffuse_color') {
           target.diffuse_color = value;
           target._baseColor = parsePythonColor(value, '#38bdf8');
+          if (Array.isArray(value) && value.length >= 4 && typeof value[3] === 'number' && value[3] < 0.99) {
+            target._alpha = value[3];
+          }
           target._sync();
           return true;
         }
@@ -2801,6 +4185,31 @@ export async function executeBlenderPythonScript(
         }
         if (prop === 'roughness') {
           target.roughness = Number(value) || 0.35;
+          target._sync();
+          return true;
+        }
+        if (prop === 'use_backface_culling') {
+          target.use_backface_culling = Boolean(value);
+          target._sync();
+          return true;
+        }
+        if (prop === 'blend_method') {
+          target.blend_method = String(value);
+          target._sync();
+          return true;
+        }
+        if (prop === 'texture' || prop === 'pattern' || prop === 'textura') {
+          target._texturePattern = resolveTexturePatternId(String(value));
+          target._sync();
+          return true;
+        }
+        if (prop === 'texture_repeat' || prop === 'repeat') {
+          target._textureRepeat = Math.max(1, Math.min(16, Number(value) || 2));
+          target._sync();
+          return true;
+        }
+        if (prop === 'natural_color') {
+          target._textureNaturalColor = Boolean(value);
           target._sync();
           return true;
         }
@@ -2822,11 +4231,16 @@ export async function executeBlenderPythonScript(
     width: number;
     segments: number;
     thickness: number;
+    offset: number;
+    use_flip_normals: boolean;
+    material_offset: number;
     count: number;
     use_relative_offset: boolean;
     relative_offset_displace: number[];
     use_constant_offset: boolean;
     constant_offset_displace: number[];
+    use_object_offset: boolean;
+    offset_object: any;
     ratio: number;
     angle: number;
     factor: number;
@@ -2837,6 +4251,7 @@ export async function executeBlenderPythonScript(
   let currentActiveObjProxy: any = null;
 
   const createBlenderObjectProxy = (mesh: THREE.Mesh) => {
+    applyRotOrderForMode(mesh);
     const locProxy = createBlenderVectorProxy(
       () => [mesh.position.x, mesh.position.y, mesh.position.z],
       (x, y, z) => mesh.position.set(x, y, z),
@@ -2851,7 +4266,10 @@ export async function executeBlenderPythonScript(
     );
     const rotProxy = createBlenderVectorProxy(
       () => [mesh.rotation.x, mesh.rotation.y, mesh.rotation.z],
-      (x, y, z) => mesh.rotation.set(x, y, z),
+      (x, y, z) => {
+        applyRotOrderForMode(mesh);
+        mesh.rotation.set(x, y, z);
+      },
       'rotation',
       isZUp
     );
@@ -2859,8 +4277,12 @@ export async function executeBlenderPythonScript(
     const assignedMaterials: BlenderMaterialInstance[] = [];
     const modifiersList: PendingModifier[] = [];
 
-    const linkMatToMesh = (mat: any) => {
+    const linkMatToMesh = (mat: any, slotIndex: number = 0) => {
       if (!mat) return;
+      if (slotIndex > 0) {
+        // Segundo slot de material (usado frecuentemente con SOLIDIFY material_offset = 1 para Outlines estilo Anime)
+        return;
+      }
       if (mat._isBlenderMaterial) {
         mat._linkedMeshes.add(mesh);
         mat._sync();
@@ -2874,8 +4296,9 @@ export async function executeBlenderPythonScript(
       get(target, prop) {
         if (prop === 'append') {
           return (mat: any) => {
+            const slotIdx = target.length;
             target.push(mat);
-            linkMatToMesh(mat);
+            linkMatToMesh(mat, slotIdx);
           };
         }
         if (prop === 'clear') {
@@ -2889,7 +4312,7 @@ export async function executeBlenderPythonScript(
         const idx = Number(prop);
         if (!Number.isNaN(idx)) {
           target[idx] = value;
-          linkMatToMesh(value);
+          linkMatToMesh(value, idx);
           return true;
         }
         return Reflect.set(target, prop, value);
@@ -2911,14 +4334,19 @@ export async function executeBlenderPythonScript(
               render_levels: 2,
               use_axis: [true, false, false],
               mirror_object: null,
-              width: 0.04,
+              width: 0.03,
               segments: 2,
-              thickness: 0.05,
+              thickness: 0.04,
+              offset: -1,
+              use_flip_normals: false,
+              material_offset: 0,
               count: 2,
               use_relative_offset: true,
               relative_offset_displace: [1.0, 0, 0],
               use_constant_offset: false,
               constant_offset_displace: [0, 0, 0],
+              use_object_offset: false,
+              offset_object: null,
               ratio: 0.5,
               angle: 0.4,
               factor: 0.4,
@@ -2966,6 +4394,9 @@ export async function executeBlenderPythonScript(
       bevel_resolution: 2,
       extrude: 0,
       use_auto_smooth: true,
+      energy: 1000,
+      color: [1, 1, 1],
+      size: 2.0,
       get vertices() {
         return getMeshVertexProxies();
       },
@@ -2992,6 +4423,7 @@ export async function executeBlenderPythonScript(
     const rawObj = {
       _threeMesh: mesh,
       _modifiers: modifiersList,
+      _assignedMaterials: assignedMaterials,
       name: mesh.name,
       type: 'MESH',
       mode: 'OBJECT',
@@ -3028,7 +4460,7 @@ export async function executeBlenderPythonScript(
         clonedMesh.scale.copy(mesh.scale);
         const origMat = mesh.userData.originalMaterial as THREE.MeshStandardMaterial | undefined;
         const col = origMat ? origMat.color.clone() : new THREE.Color('#38bdf8');
-        configureNewlySpawnedMesh(clonedMesh, col, gradientTex, outThick, outOpac);
+        configureNewlySpawnedMesh(clonedMesh, col, gradientTex, outThick, outOpac, mesh.userData.pbrProps);
         return createBlenderObjectProxy(clonedMesh);
       },
     };
@@ -3048,7 +4480,7 @@ export async function executeBlenderPythonScript(
                   },
                   set material(m: any) {
                     arr[idx] = m;
-                    linkMatToMesh(m);
+                    linkMatToMesh(m, idx);
                   },
                 };
               }
@@ -3106,6 +4538,7 @@ export async function executeBlenderPythonScript(
           return true;
         }
         if (prop === 'rotation_euler' || prop === 'rotation') {
+          applyRotOrderForMode(mesh);
           if (Array.isArray(value)) {
             const [rx, ry, rz] = convertRotToThree(value);
             mesh.rotation.set(rx, ry, rz);
@@ -3116,7 +4549,7 @@ export async function executeBlenderPythonScript(
         }
         if (prop === 'active_material' || prop === 'color') {
           assignedMaterials[0] = value;
-          linkMatToMesh(value);
+          linkMatToMesh(value, 0);
           return true;
         }
         return Reflect.set(target, prop, value);
@@ -3146,26 +4579,49 @@ export async function executeBlenderPythonScript(
       rotation?: [number, number, number];
       scale?: [number, number, number] | number;
       color?: [number, number, number] | string;
+      alreadyThreeSpace?: boolean;
     }
   ) => {
     const col = parsePythonColor(opts?.color, '#e11d48');
     const mesh = new THREE.Mesh(geometry);
     mesh.name = `${name}_${objectsCreatedCount + 1}`;
+    const inThree = Boolean(opts?.alreadyThreeSpace);
 
     if (opts?.location && Array.isArray(opts.location)) {
-      const [tx, ty, tz] = convertLocToThree(opts.location);
+      const [tx, ty, tz] = inThree
+        ? [
+            Number(opts.location[0]) || 0,
+            Number(opts.location[1]) || 0,
+            Number(opts.location[2]) || 0,
+          ]
+        : convertLocToThree(opts.location);
       mesh.position.set(tx, ty, tz);
     } else {
-      mesh.position.set(0, isZUp ? 0 : 1.35, 0);
+      mesh.position.set(0, isZUp && !inThree ? 0 : 1.35, 0);
     }
 
+    applyRotOrderForMode(mesh, inThree);
     if (opts?.rotation && Array.isArray(opts.rotation)) {
-      const [rx, ry, rz] = convertRotToThree(opts.rotation);
+      const [rx, ry, rz] = inThree
+        ? [
+            Number(opts.rotation[0]) || 0,
+            Number(opts.rotation[1]) || 0,
+            Number(opts.rotation[2]) || 0,
+          ]
+        : convertRotToThree(opts.rotation);
       mesh.rotation.set(rx, ry, rz);
     }
 
     if (opts?.scale !== undefined) {
-      const [sx, sy, sz] = convertScaleToThree(opts.scale);
+      const [sx, sy, sz] = inThree
+        ? typeof opts.scale === 'number'
+          ? [opts.scale, opts.scale, opts.scale]
+          : [
+              Number(opts.scale[0]) || 1,
+              Number(opts.scale[1]) || 1,
+              Number(opts.scale[2]) || 1,
+            ]
+        : convertScaleToThree(opts.scale);
       mesh.scale.set(sx, sy, sz);
     }
 
@@ -3186,6 +4642,41 @@ export async function executeBlenderPythonScript(
     return currentActiveObjProxy;
   };
 
+  // Subdividir cada triángulo de un BufferGeometry en 4 triángulos (para SUBSURF y BEVEL de cajas)
+  const subdivideGeometryTriangles = (geo: THREE.BufferGeometry, levels: number = 1): THREE.BufferGeometry => {
+    let current = geo.index ? geo.toNonIndexed() : geo.clone();
+    const passes = Math.min(2, Math.max(1, Math.floor(levels)));
+    for (let pass = 0; pass < passes; pass++) {
+      const pos = current.attributes.position as THREE.BufferAttribute;
+      if (!pos || pos.count < 3 || pos.count > 24000) break;
+      const newPositions = new Float32Array(pos.count * 4 * 3);
+      let outIdx = 0;
+      const writeV = (x: number, y: number, z: number) => {
+        newPositions[outIdx++] = x;
+        newPositions[outIdx++] = y;
+        newPositions[outIdx++] = z;
+      };
+      for (let i = 0; i + 2 < pos.count; i += 3) {
+        const ax = pos.getX(i), ay = pos.getY(i), az = pos.getZ(i);
+        const bx = pos.getX(i + 1), by = pos.getY(i + 1), bz = pos.getZ(i + 1);
+        const cx = pos.getX(i + 2), cy = pos.getY(i + 2), cz = pos.getZ(i + 2);
+        const abx = (ax + bx) * 0.5, aby = (ay + by) * 0.5, abz = (az + bz) * 0.5;
+        const bcx = (bx + cx) * 0.5, bcy = (by + cy) * 0.5, bcz = (bz + cz) * 0.5;
+        const cax = (cx + ax) * 0.5, cay = (cy + ay) * 0.5, caz = (cz + az) * 0.5;
+
+        writeV(ax, ay, az); writeV(abx, aby, abz); writeV(cax, cay, caz);
+        writeV(bx, by, bz); writeV(bcx, bcy, bcz); writeV(abx, aby, abz);
+        writeV(cx, cy, cz); writeV(cax, cay, caz); writeV(bcx, bcy, bcz);
+        writeV(abx, aby, abz); writeV(bcx, bcy, bcz); writeV(cax, cay, caz);
+      }
+      const nextGeo = new THREE.BufferGeometry();
+      nextGeo.setAttribute('position', new THREE.BufferAttribute(newPositions.subarray(0, outIdx), 3));
+      nextGeo.computeVertexNormals();
+      current = nextGeo;
+    }
+    return current;
+  };
+
   // Procesador de modificadores de Blender 5.2 (MIRROR, SUBSURF, BEVEL, SOLIDIFY, ARRAY, DECIMATE)
   const applyPendingModifiersForObject = async (objProxy: any) => {
     const mesh: THREE.Mesh | undefined = objProxy?._threeMesh;
@@ -3197,7 +4688,41 @@ export async function executeBlenderPythonScript(
       mod._applied = true;
 
       const mType = mod.type.toUpperCase();
-      if (mType === 'MIRROR') {
+      if (mType === 'BEVEL') {
+        const width = Math.max(0.005, Math.min(0.35, Number(mod.width) || 0.02));
+        const segments = Math.min(4, Math.max(1, Number(mod.segments) || 2));
+        // Si la malla tiene pocos triángulos (ej. un cubo de 12 triángulos), subdividir para poder biselar los bordes
+        const posAttr = mesh.geometry.attributes.position as THREE.BufferAttribute | undefined;
+        if (posAttr && posAttr.count <= 72) {
+          mesh.geometry = subdivideGeometryTriangles(mesh.geometry, segments >= 2 ? 2 : 1);
+        }
+        const wrapperGroup = new THREE.Group();
+        const tempClone = new THREE.Mesh(mesh.geometry);
+        wrapperGroup.add(tempClone);
+        applyGlobalLaplacianSmoothing(wrapperGroup, segments, Math.min(0.45, width * 6.5));
+        mesh.geometry.computeVertexNormals();
+        prepareGeometryNormals(mesh);
+        if (mesh.userData.outlineMesh) {
+          (mesh.userData.outlineMesh as THREE.Mesh).geometry = mesh.geometry;
+        }
+        logs.push(`Modifier BEVEL (width=${width}, segments=${segments}) aplicado sobre '${mesh.name}'.`);
+      } else if (mType === 'SUBSURF' || mType === 'SUBDIVISION_SURFACE') {
+        const levels = Math.min(3, Math.max(1, Number(mod.levels ?? mod.render_levels) || 2));
+        const posAttr = mesh.geometry.attributes.position as THREE.BufferAttribute | undefined;
+        if (posAttr && posAttr.count <= 4000) {
+          mesh.geometry = subdivideGeometryTriangles(mesh.geometry, Math.min(2, levels));
+        }
+        const wrapperGroup = new THREE.Group();
+        const tempClone = new THREE.Mesh(mesh.geometry);
+        wrapperGroup.add(tempClone);
+        applyGlobalLaplacianSmoothing(wrapperGroup, levels + 1, 0.48);
+        mesh.geometry.computeVertexNormals();
+        prepareGeometryNormals(mesh);
+        if (mesh.userData.outlineMesh) {
+          (mesh.userData.outlineMesh as THREE.Mesh).geometry = mesh.geometry;
+        }
+        logs.push(`Modifier SUBSURF (levels=${levels}) aplicado sobre '${mesh.name}'.`);
+      } else if (mType === 'MIRROR') {
         const useX = Array.isArray(mod.use_axis) ? Boolean(mod.use_axis[0]) : true;
         const useY = Array.isArray(mod.use_axis) ? Boolean(mod.use_axis[1]) : false;
         const useZ = Array.isArray(mod.use_axis) ? Boolean(mod.use_axis[2]) : false;
@@ -3242,14 +4767,25 @@ export async function executeBlenderPythonScript(
             clonedGeo.computeVertexNormals();
           }
 
-          const origMat = mesh.userData.originalMaterial as THREE.MeshStandardMaterial | undefined;
+          const origMat = mesh.userData.originalMaterial as THREE.MeshPhysicalMaterial | undefined;
           const col = origMat ? origMat.color.clone() : new THREE.Color('#38bdf8');
-          configureNewlySpawnedMesh(cloneMesh, col, gradientTex, outThick, outOpac, {
+          const savedPbr: ExtendedPBRMaterialProps = {
+            ...(mesh.userData.pbrProps || {}),
             metallic: origMat?.metalness,
             roughness: origMat?.roughness,
             emissionColor: origMat?.emissive,
             emissionStrength: origMat?.emissiveIntensity,
-          });
+          };
+          configureNewlySpawnedMesh(cloneMesh, col, gradientTex, outThick, outOpac, savedPbr);
+          applyMaterialToThreeMesh(
+            cloneMesh,
+            col,
+            savedPbr.metallic ?? 0.2,
+            savedPbr.roughness ?? 0.38,
+            savedPbr.emissionColor,
+            savedPbr.emissionStrength ?? 0,
+            savedPbr
+          );
           targetParent.add(cloneMesh);
           objectsCreatedCount++;
         };
@@ -3259,7 +4795,7 @@ export async function executeBlenderPythonScript(
         if (useZ) spawnMirrorAxis(false, isZUp, !isZUp);
         logs.push(`Modifier MIRROR aplicado sobre '${mesh.name}'.`);
       } else if (mType === 'ARRAY') {
-        const count = Math.min(24, Math.max(1, Number(mod.count) || 2));
+        const count = Math.min(150, Math.max(1, Number(mod.count) || 2));
         mesh.geometry.computeBoundingBox();
         const bb = mesh.geometry.boundingBox;
         const size = new THREE.Vector3(1, 1, 1);
@@ -3268,40 +4804,105 @@ export async function executeBlenderPythonScript(
 
         const rel = convertLocToThree(mod.relative_offset_displace || [1, 0, 0]);
         const cst = convertLocToThree(mod.constant_offset_displace || [0, 0, 0]);
+        const offsetMesh: THREE.Object3D | undefined = mod.offset_object?._threeMesh;
+
+        const origMat = mesh.userData.originalMaterial as THREE.MeshPhysicalMaterial | undefined;
+        const col = origMat ? origMat.color.clone() : new THREE.Color('#38bdf8');
+        const savedPbr: ExtendedPBRMaterialProps = {
+          ...(mesh.userData.pbrProps || {}),
+          metallic: origMat?.metalness,
+          roughness: origMat?.roughness,
+          emissionColor: origMat?.emissive,
+          emissionStrength: origMat?.emissiveIntensity,
+        };
 
         for (let k = 1; k < count; k++) {
           const cloneGeo = mesh.geometry.clone();
           const cloneMesh = new THREE.Mesh(cloneGeo);
           cloneMesh.name = `${mesh.name}_Array_${k}`;
-          cloneMesh.position.set(
-            mesh.position.x + k * ((mod.use_relative_offset ? rel[0] * size.x : 0) + (mod.use_constant_offset ? cst[0] : 0)),
-            mesh.position.y + k * ((mod.use_relative_offset ? rel[1] * size.y : 0) + (mod.use_constant_offset ? cst[1] : 0)),
-            mesh.position.z + k * ((mod.use_relative_offset ? rel[2] * size.z : 0) + (mod.use_constant_offset ? cst[2] : 0))
-          );
-          cloneMesh.rotation.copy(mesh.rotation);
+
+          if (mod.use_object_offset && offsetMesh) {
+            // Array radial o por objeto de referencia (ej. 20 radios de llanta o rosetón gótico)
+            const stepRotX = offsetMesh.rotation.x * k;
+            const stepRotY = offsetMesh.rotation.y * k;
+            const stepRotZ = offsetMesh.rotation.z * k;
+            const pivot = offsetMesh.position.clone();
+            const relPos = mesh.position.clone().sub(pivot);
+            relPos.applyEuler(new THREE.Euler(stepRotX, stepRotY, stepRotZ));
+            cloneMesh.position.copy(pivot.add(relPos));
+            cloneMesh.rotation.set(
+              mesh.rotation.x + stepRotX,
+              mesh.rotation.y + stepRotY,
+              mesh.rotation.z + stepRotZ
+            );
+          } else {
+            cloneMesh.position.set(
+              mesh.position.x +
+                k *
+                  ((mod.use_relative_offset ? rel[0] * size.x : 0) +
+                    (mod.use_constant_offset ? cst[0] : 0)),
+              mesh.position.y +
+                k *
+                  ((mod.use_relative_offset ? rel[1] * size.y : 0) +
+                    (mod.use_constant_offset ? cst[1] : 0)),
+              mesh.position.z +
+                k *
+                  ((mod.use_relative_offset ? rel[2] * size.z : 0) +
+                    (mod.use_constant_offset ? cst[2] : 0))
+            );
+            cloneMesh.rotation.copy(mesh.rotation);
+          }
+
           cloneMesh.scale.copy(mesh.scale);
-          const origMat = mesh.userData.originalMaterial as THREE.MeshStandardMaterial | undefined;
-          const col = origMat ? origMat.color.clone() : new THREE.Color('#38bdf8');
-          configureNewlySpawnedMesh(cloneMesh, col, gradientTex, outThick, outOpac);
+          configureNewlySpawnedMesh(cloneMesh, col, gradientTex, outThick, outOpac, savedPbr);
+          applyMaterialToThreeMesh(
+            cloneMesh,
+            col,
+            savedPbr.metallic ?? 0.2,
+            savedPbr.roughness ?? 0.38,
+            savedPbr.emissionColor,
+            savedPbr.emissionStrength ?? 0,
+            savedPbr
+          );
           targetParent.add(cloneMesh);
           objectsCreatedCount++;
         }
         logs.push(`Modifier ARRAY (count=${count}) aplicado sobre '${mesh.name}'.`);
       } else if (mType === 'SOLIDIFY') {
-        const thick = Number(mod.thickness) || 0.04;
-        const pos = mesh.geometry.attributes.position as THREE.BufferAttribute;
-        const norm = mesh.geometry.attributes.normal as THREE.BufferAttribute;
-        if (pos && norm) {
-          for (let i = 0; i < pos.count; i++) {
-            pos.setXYZ(
-              i,
-              pos.getX(i) + norm.getX(i) * thick * 0.35,
-              pos.getY(i) + norm.getY(i) * thick * 0.35,
-              pos.getZ(i) + norm.getZ(i) * thick * 0.35
-            );
+        const rawThick = Number(mod.thickness) || 0.04;
+        // Detectar técnica de Outline CelShade con Solidify (use_flip_normals=True, grosor negativo o material_offset=1)
+        if (mod.use_flip_normals || rawThick < 0 || Number(mod.material_offset) >= 1) {
+          const outlineMesh = mesh.userData.outlineMesh as THREE.Mesh | undefined;
+          if (outlineMesh) {
+            const absThick = Math.min(4.0, Math.max(0.6, Math.abs(rawThick) * 38));
+            const outlineMat = createComicOutlineMaterial(absThick, 0.98);
+            const secondMat = objProxy?._assignedMaterials?.[1] as BlenderMaterialInstance | undefined;
+            if (secondMat && outlineMat.uniforms?.uOutlineColor) {
+              const outCol = secondMat._emissionColor || secondMat._baseColor;
+              if (outCol) outlineMat.uniforms.uOutlineColor.value.copy(outCol);
+            }
+            outlineMesh.material = outlineMat;
+            outlineMesh.visible = true;
           }
-          pos.needsUpdate = true;
-          mesh.geometry.computeVertexNormals();
+          logs.push(
+            `Modifier SOLIDIFY (CelShade Outline / Flip Normals, thickness=${rawThick}) aplicado sobre '${mesh.name}'.`
+          );
+        } else {
+          const pos = mesh.geometry.attributes.position as THREE.BufferAttribute;
+          const norm = mesh.geometry.attributes.normal as THREE.BufferAttribute;
+          if (pos && norm) {
+            for (let i = 0; i < pos.count; i++) {
+              pos.setXYZ(
+                i,
+                pos.getX(i) + norm.getX(i) * rawThick * 0.35,
+                pos.getY(i) + norm.getY(i) * rawThick * 0.35,
+                pos.getZ(i) + norm.getZ(i) * rawThick * 0.35
+              );
+            }
+            pos.needsUpdate = true;
+            mesh.geometry.computeVertexNormals();
+          }
+          logs.push(`Modifier SOLIDIFY (thickness=${rawThick}) aplicado sobre '${mesh.name}'.`);
         }
       }
     }
@@ -3359,24 +4960,80 @@ export async function executeBlenderPythonScript(
         if (prop === 'append') {
           return (mat: any) => {
             target.push(mat);
+            const ownerProxy = (meshDataObj as any)._ownerProxy;
+            if (ownerProxy && ownerProxy.data && ownerProxy.data.materials) {
+              ownerProxy.data.materials.append(mat);
+            }
           };
         }
         if (prop === 'clear') {
           return () => {
             target.length = 0;
+            const ownerProxy = (meshDataObj as any)._ownerProxy;
+            if (ownerProxy && ownerProxy.data && ownerProxy.data.materials) {
+              ownerProxy.data.materials.clear();
+            }
           };
         }
         return Reflect.get(target, prop);
       },
+      set(target, prop, value) {
+        const idx = Number(prop);
+        if (!Number.isNaN(idx)) {
+          target[idx] = value;
+          const ownerProxy = (meshDataObj as any)._ownerProxy;
+          if (ownerProxy && ownerProxy.data && ownerProxy.data.materials) {
+            ownerProxy.data.materials[idx] = value;
+          }
+          return true;
+        }
+        return Reflect.set(target, prop, value);
+      },
     });
+
+    const syncGeometryToBoundMesh = (newGeo: THREE.BufferGeometry) => {
+      meshDataObj._threeGeometry = newGeo;
+      meshDataObj._geometry = newGeo;
+      meshDataObj._needsRebuild = true;
+      const boundMesh: THREE.Mesh | null =
+        meshDataObj._threeMesh || (meshDataObj._ownerProxy?._threeMesh as THREE.Mesh | null) || null;
+      if (boundMesh) {
+        boundMesh.geometry = newGeo;
+        prepareGeometryNormals(boundMesh);
+        const posAttr = boundMesh.geometry.attributes.position as THREE.BufferAttribute | undefined;
+        if (posAttr && posAttr.count > 0) {
+          boundMesh.userData.initialPositions = new Float32Array(posAttr.array);
+        }
+        meshDataObj._geometry = boundMesh.geometry;
+        if (boundMesh.userData.outlineMesh) {
+          (boundMesh.userData.outlineMesh as THREE.Mesh).geometry = boundMesh.geometry;
+        }
+        const mats = [
+          boundMesh.material,
+          boundMesh.userData.originalMaterial,
+          boundMesh.userData.toonMaterial,
+          boundMesh.userData.matcapMaterial,
+        ];
+        for (const m of mats) {
+          if (m && typeof m === 'object' && 'side' in m) {
+            (m as THREE.Material).side = THREE.DoubleSide;
+          }
+        }
+      }
+    };
 
     const meshDataObj = {
       name: String(meshName),
       users: 1,
       _geometry: customGeo,
+      _threeGeometry: customGeo,
+      _threeMesh: null as THREE.Mesh | null,
+      _ownerProxy: null as any,
+      _needsRebuild: false,
       materials: meshMaterialsProxy,
       polygons: [] as any[],
       vertices: [] as any[],
+      _syncGeometryToBoundMesh: syncGeometryToBoundMesh,
       from_pydata: (...fdArgs: unknown[]) => {
         const { vertices: rawVerts, faces: rawFaces } = extractPyArgs(
           fdArgs,
@@ -3395,40 +5052,13 @@ export async function executeBlenderPythonScript(
           return isZUp ? [vx, vz, -vy] : [vx, vy, vz];
         });
 
-        let cx = 0, cy = 0, cz = 0;
-        if (transformedVerts.length > 0) {
-          for (const v of transformedVerts) {
-            cx += v[0];
-            cy += v[1];
-            cz += v[2];
-          }
-          cx /= transformedVerts.length;
-          cy /= transformedVerts.length;
-          cz /= transformedVerts.length;
-        }
-
-        const pushOutwardTriangle = (
+        const pushTriangle = (
           a: [number, number, number],
           b: [number, number, number],
           c: [number, number, number]
         ) => {
-          const abx = b[0] - a[0], aby = b[1] - a[1], abz = b[2] - a[2];
-          const acx = c[0] - a[0], acy = c[1] - a[1], acz = c[2] - a[2];
-          const nx = aby * acz - abz * acy;
-          const ny = abz * acx - abx * acz;
-          const nz = abx * acy - aby * acx;
-          const tx = (a[0] + b[0] + c[0]) / 3 - cx;
-          const ty = (a[1] + b[1] + c[1]) / 3 - cy;
-          const tz = (a[2] + b[2] + c[2]) / 3 - cz;
-          const dot = nx * tx + ny * ty + nz * tz;
-
-          if (dot < 0) {
-            positions.push(a[0], a[1], a[2], c[0], c[1], c[2], b[0], b[1], b[2]);
-            uvs.push(a[0], a[1], c[0], c[1], b[0], b[1]);
-          } else {
-            positions.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]);
-            uvs.push(a[0], a[1], b[0], b[1], c[0], c[1]);
-          }
+          positions.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]);
+          uvs.push(a[0], a[2], b[0], b[2], c[0], c[2]);
         };
 
         for (const rawFace of faces) {
@@ -3442,13 +5072,13 @@ export async function executeBlenderPythonScript(
             const v0 = transformedVerts[faceIndices[0]];
             const v1 = transformedVerts[faceIndices[1]];
             const v2 = transformedVerts[faceIndices[2]];
-            if (v0 && v1 && v2) pushOutwardTriangle(v0, v1, v2);
+            if (v0 && v1 && v2) pushTriangle(v0, v1, v2);
           } else if (faceIndices.length >= 4) {
             const v0 = transformedVerts[faceIndices[0]];
             for (let k = 1; k < faceIndices.length - 1; k++) {
               const v1 = transformedVerts[faceIndices[k]];
               const v2 = transformedVerts[faceIndices[k + 1]];
-              if (v0 && v1 && v2) pushOutwardTriangle(v0, v1, v2);
+              if (v0 && v1 && v2) pushTriangle(v0, v1, v2);
             }
           }
         }
@@ -3465,15 +5095,21 @@ export async function executeBlenderPythonScript(
             uvs.push(0, 0, 1, 0, 0.5, 1);
           }
         }
-        customGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
-        customGeo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(uvs), 2));
-        customGeo.computeVertexNormals();
+
+        const builtGeo = new THREE.BufferGeometry();
+        builtGeo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+        builtGeo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+        builtGeo.computeVertexNormals();
+        syncGeometryToBoundMesh(builtGeo);
         logs.push(
           `mesh.from_pydata: ${transformedVerts.length} vértices y ${faces.length} caras ensambladas.`
         );
       },
       update: () => {
-        customGeo.computeVertexNormals();
+        meshDataObj._geometry.computeVertexNormals();
+        if (meshDataObj._threeMesh) {
+          prepareGeometryNormals(meshDataObj._threeMesh);
+        }
       },
     };
     meshesStore.push(meshDataObj);
@@ -3483,15 +5119,39 @@ export async function executeBlenderPythonScript(
   const linkObjectToScene = (objProxy: any) => {
     if (objProxy && objProxy._threeMesh) {
       const mesh = objProxy._threeMesh as THREE.Mesh;
+      const customMeshData = objProxy._meshData || objProxy.data;
+      if (customMeshData?._threeGeometry && customMeshData._threeGeometry.attributes?.position?.count > 0) {
+        mesh.geometry = customMeshData._threeGeometry;
+      }
       if (!mesh.parent) {
         const col = objProxy._color || new THREE.Color('#22d3ee');
         configureNewlySpawnedMesh(mesh, col, gradientTex, outThick, outOpac);
-        if (Array.isArray(objProxy._pendingMaterials)) {
-          objProxy._pendingMaterials.forEach((m: any) => {
-            objProxy.data.materials.append(m);
+        if (customMeshData) {
+          customMeshData._threeMesh = mesh;
+          customMeshData._geometry = mesh.geometry;
+        }
+        const pendingMats = [
+          ...(Array.isArray(objProxy._pendingMaterials) ? objProxy._pendingMaterials : []),
+          ...(Array.isArray(customMeshData?.materials) ? customMeshData.materials : []),
+        ];
+        if (pendingMats.length > 0) {
+          pendingMats.forEach((m: any) => {
+            if (m) objProxy.data.materials.append(m);
           });
         }
+        const mats = [
+          mesh.material,
+          mesh.userData.originalMaterial,
+          mesh.userData.toonMaterial,
+          mesh.userData.matcapMaterial,
+        ];
+        for (const m of mats) {
+          if (m && typeof m === 'object' && 'side' in m) {
+            (m as THREE.Material).side = THREE.DoubleSide;
+          }
+        }
         targetParent.add(mesh);
+        objProxy._threeObject = mesh;
         objectsCreatedCount++;
         proxiesDirty = true;
         collectMeshes();
@@ -3508,8 +5168,12 @@ export async function executeBlenderPythonScript(
     }
     NoopConstructor.prototype = {};
     return new Proxy(NoopConstructor, {
+      has(target, prop) {
+        return prop in extra || prop in target;
+      },
       get(target, prop) {
         if (prop in extra) return extra[prop as string];
+        if (prop === 'then' || prop === 'catch' || prop === 'finally') return undefined;
         if (prop === Symbol.toPrimitive) return () => 0;
         if (prop === 'valueOf') return () => 0;
         if (prop === 'toString') return () => '';
@@ -3525,7 +5189,8 @@ export async function executeBlenderPythonScript(
         }
         return createSafeNoopProxy();
       },
-      set() {
+      set(_target, prop, value) {
+        extra[prop as string] = value;
         return true;
       },
       apply() {
@@ -3557,6 +5222,230 @@ export async function executeBlenderPythonScript(
     },
   });
 
+  // Entorno World de Blender 5.2 (Background Node Color + Strength -> HemisphereLight / AmbientLight en Three.js)
+  let worldEnvLight: THREE.HemisphereLight | null = null;
+  let worldBgColor = new THREE.Color('#d8dee9');
+  let worldBgStrength = 0.85;
+
+  const syncWorldEnvironmentLight = () => {
+    if (!worldEnvLight) {
+      const groundCol = worldBgColor.clone().multiplyScalar(0.35);
+      worldEnvLight = new THREE.HemisphereLight(
+        worldBgColor,
+        groundCol,
+        Math.min(2.5, Math.max(0.1, worldBgStrength))
+      );
+      worldEnvLight.name = 'Blender_World_Environment';
+      targetParent.add(worldEnvLight);
+    } else {
+      worldEnvLight.color.copy(worldBgColor);
+      worldEnvLight.groundColor.copy(worldBgColor).multiplyScalar(0.35);
+      worldEnvLight.intensity = Math.min(2.5, Math.max(0.1, worldBgStrength));
+    }
+  };
+
+  const createWorldSocketProxy = (key: string) => {
+    let _val: any = key === '0' || key.toLowerCase().includes('color') ? [0.75, 0.78, 0.82, 1.0] : 1.0;
+    return {
+      name: key,
+      get default_value() {
+        return _val;
+      },
+      set default_value(v: any) {
+        _val = v;
+        const kLow = key.toLowerCase();
+        if (kLow === '0' || kLow.includes('color')) {
+          worldBgColor = parsePythonColor(v, '#d8dee9');
+          syncWorldEnvironmentLight();
+        } else if (kLow === '1' || kLow.includes('strength')) {
+          worldBgStrength = Number(v) || 1.0;
+          syncWorldEnvironmentLight();
+        }
+      },
+    };
+  };
+
+  const worldBgNode = {
+    name: 'Background',
+    type: 'BACKGROUND',
+    inputs: new Proxy({} as Record<string, any>, {
+      get(t, p) {
+        if (typeof p === 'string') {
+          if (p === 'get') return (n: string) => (t[n] = t[n] || createWorldSocketProxy(n));
+          if (!t[p]) t[p] = createWorldSocketProxy(p);
+          return t[p];
+        }
+        return Reflect.get(t, p);
+      },
+    }),
+    outputs: createSafeNoopProxy(),
+  };
+
+  const worldProxyObj = new Proxy(
+    {
+      name: 'World',
+      use_nodes: true,
+      get color() {
+        return [worldBgColor.r, worldBgColor.g, worldBgColor.b];
+      },
+      set color(v: any) {
+        worldBgColor = parsePythonColor(v, '#d8dee9');
+        syncWorldEnvironmentLight();
+      },
+      node_tree: {
+        nodes: new Proxy(
+          { Background: worldBgNode, 'World Output': createSafeNoopProxy() } as Record<string, any>,
+          {
+            get(t, p) {
+              if (p === 'get') return (n: string) => t[n] || worldBgNode;
+              if (p === 'new') return () => worldBgNode;
+              if (typeof p === 'string') return t[p] || worldBgNode;
+              return Reflect.get(t, p);
+            },
+          }
+        ),
+        links: createSafeNoopProxy(),
+      },
+    },
+    {
+      get(t, p) {
+        if (p in t) return (t as any)[p];
+        return createSafeNoopProxy();
+      },
+      set(t, p, v) {
+        if (p === 'color') {
+          worldBgColor = parsePythonColor(v, '#d8dee9');
+          syncWorldEnvironmentLight();
+          return true;
+        }
+        return Reflect.set(t, p, v);
+      },
+    }
+  );
+
+  const createBlenderLightObject = (
+    lightName: string,
+    lightType: string = 'SUN',
+    loc?: [number, number, number],
+    rot?: [number, number, number],
+    energyVal?: number,
+    colorVal?: any
+  ) => {
+    const lType = String(lightType || 'SUN').toUpperCase();
+    const lCol = parsePythonColor(colorVal, '#fff8e7');
+    let rawEnergy = energyVal !== undefined ? Number(energyVal) : lType === 'SUN' ? 3.0 : 400;
+
+    const computeThreeIntensity = (e: number) => {
+      if (lType === 'SUN') return Math.min(4.5, Math.max(0.2, e * 0.55));
+      return Math.min(5.0, Math.max(0.25, e / 180));
+    };
+
+    let threeLight: THREE.Light;
+    if (lType === 'SUN' || lType === 'AREA') {
+      threeLight = new THREE.DirectionalLight(lCol, computeThreeIntensity(rawEnergy));
+    } else if (lType === 'SPOT') {
+      threeLight = new THREE.SpotLight(lCol, computeThreeIntensity(rawEnergy), 35, Math.PI / 3, 0.35);
+    } else {
+      threeLight = new THREE.PointLight(lCol, computeThreeIntensity(rawEnergy), 30);
+    }
+
+    threeLight.name = lightName;
+    if (loc && Array.isArray(loc)) {
+      const [tx, ty, tz] = convertLocToThree(loc);
+      threeLight.position.set(tx, ty, tz);
+    } else {
+      threeLight.position.set(4, 7, 5);
+    }
+    if (rot && Array.isArray(rot)) {
+      const [rx, ry, rz] = convertRotToThree(rot);
+      threeLight.rotation.set(rx, ry, rz);
+    }
+    targetParent.add(threeLight);
+
+    const lightDataProxy = new Proxy(
+      {
+        name: lightName,
+        type: lType,
+        size: 2.0,
+        angle: 0.5,
+        use_shadow: true,
+        _threeLight: threeLight,
+      },
+      {
+        get(t, p) {
+          if (p === 'energy') return rawEnergy;
+          if (p === 'color') return [threeLight.color.r, threeLight.color.g, threeLight.color.b];
+          return Reflect.get(t, p);
+        },
+        set(t, p, v) {
+          if (p === 'energy') {
+            rawEnergy = Number(v) || 1;
+            threeLight.intensity = computeThreeIntensity(rawEnergy);
+            return true;
+          }
+          if (p === 'color') {
+            threeLight.color.copy(parsePythonColor(v, '#ffffff'));
+            return true;
+          }
+          return Reflect.set(t, p, v);
+        },
+      }
+    );
+
+    const locProxy = createBlenderVectorProxy(
+      () => [threeLight.position.x, threeLight.position.y, threeLight.position.z],
+      (x, y, z) => threeLight.position.set(x, y, z),
+      'location',
+      isZUp
+    );
+    const rotProxy = createBlenderVectorProxy(
+      () => [threeLight.rotation.x, threeLight.rotation.y, threeLight.rotation.z],
+      (x, y, z) => threeLight.rotation.set(x, y, z),
+      'rotation',
+      isZUp
+    );
+    const scaleProxy = createBlenderVectorProxy(
+      () => [threeLight.scale.x, threeLight.scale.y, threeLight.scale.z],
+      (x, y, z) => threeLight.scale.set(x, y, z),
+      'scale',
+      isZUp
+    );
+
+    const lightObjProxy = new Proxy(
+      {
+        name: lightName,
+        type: 'LIGHT',
+        _threeMesh: threeLight as any,
+        data: lightDataProxy,
+        location: locProxy,
+        rotation_euler: rotProxy,
+        rotation: rotProxy,
+        scale: scaleProxy,
+        modifiers: createSafeNoopProxy(),
+      },
+      {
+        set(t, p, v) {
+          if (p === 'location' && Array.isArray(v)) {
+            const [tx, ty, tz] = convertLocToThree(v);
+            threeLight.position.set(tx, ty, tz);
+            return true;
+          }
+          if ((p === 'rotation_euler' || p === 'rotation') && Array.isArray(v)) {
+            const [rx, ry, rz] = convertRotToThree(v);
+            threeLight.rotation.set(rx, ry, rz);
+            return true;
+          }
+          return Reflect.set(t, p, v);
+        },
+      }
+    );
+
+    allObjectProxies.push(lightObjProxy);
+    currentActiveObjProxy = lightObjProxy;
+    logs.push(`+ Luz 3D creada: '${lightName}' (tipo=${lType}).`);
+    return lightObjProxy;
+  };
+
   const sceneProxyObj = new Proxy(
     {
       name: 'Scene',
@@ -3569,10 +5458,127 @@ export async function executeBlenderPythonScript(
       },
       objects: sceneObjectsProxy,
       view_layers: createSafeNoopProxy(),
-      render: createSafeNoopProxy(),
-      cycles: createSafeNoopProxy(),
-      eevee: createSafeNoopProxy(),
-      world: createSafeNoopProxy(),
+      render: new Proxy(
+        {
+          engine: 'BLENDER_EEVEE_NEXT',
+          resolution_x: 1920,
+          resolution_y: 1080,
+          resolution_percentage: 100,
+          film_transparent: false,
+        },
+        {
+          get(t, p) {
+            if (p in t) return (t as any)[p];
+            return createSafeNoopProxy();
+          },
+          set(t, p, v) {
+            (t as any)[p] = v;
+            if (p === 'engine') {
+              const engStr = String(v || '').toUpperCase();
+              if (engStr.includes('CYCLES')) {
+                callbacks?.onRenderEngineChange?.('cycles');
+                logs.push(`[Blender 5.2 Render]: Motor cambiado a CYCLES (Path-Tracing Físico Multi-Muestra).`);
+              } else if (engStr.includes('EEVEE')) {
+                callbacks?.onRenderEngineChange?.('eevee');
+                logs.push(`[Blender 5.2 Render]: Motor cambiado a EEVEE (Tiempo Real + Bloom + IBL).`);
+              } else if (engStr.includes('WORKBENCH') || engStr.includes('MATCAP')) {
+                callbacks?.onRenderEngineChange?.('matcap');
+                logs.push(`[Blender 5.2 Render]: Motor cambiado a WORKBENCH (MatCap Escultura).`);
+              } else if (engStr.includes('CEL') || engStr.includes('TOON') || engStr.includes('ANIME')) {
+                callbacks?.onRenderEngineChange?.('cel');
+                logs.push(`[Blender 5.2 Render]: Motor cambiado a CEL-SHADING (Anime 3 Tonos + Contorno).`);
+              } else if (engStr.includes('NORMAL')) {
+                callbacks?.onRenderEngineChange?.('normals');
+                logs.push(`[Blender 5.2 Render]: Motor cambiado a NORMALES RGB (Inspección Topológica).`);
+              } else if (engStr.includes('ORIGINAL') || engStr.includes('PBR')) {
+                callbacks?.onRenderEngineChange?.('original');
+                logs.push(`[Blender 5.2 Render]: Motor cambiado a PBR ESTÁNDAR.`);
+              }
+            }
+            return true;
+          },
+        }
+      ),
+      cycles: new Proxy(
+        {
+          samples: 64,
+          preview_samples: 32,
+          use_denoising: true,
+          device: 'GPU',
+          clearcoat: 0.58,
+          roughness_factor: 0.75,
+          ior: 1.5,
+          gi_bounce: 1.35,
+          progressive_accum: true,
+        },
+        {
+          get(t, p) {
+            if (p in t) return (t as any)[p];
+            return createSafeNoopProxy();
+          },
+          set(t, p, v) {
+            (t as any)[p] = v;
+            if (p === 'samples' || p === 'preview_samples') {
+              const s = Math.max(16, Math.min(256, Number(v) || 64));
+              callbacks?.onRenderSettingsChange?.({ cyclesSamples: s });
+              logs.push(`[Blender 5.2 Cycles]: Muestras configuradas a ${s} SPP.`);
+            } else if (p === 'clearcoat' || p === 'coat_weight') {
+              const c = Math.max(0, Math.min(1, Number(v) ?? 0.58));
+              callbacks?.onRenderSettingsChange?.({ cyclesClearcoat: c });
+              logs.push(`[Blender 5.2 Cycles]: Barniz Clearcoat configurado a ${Math.round(c * 100)}%.`);
+            } else if (p === 'roughness_factor' || p === 'roughness') {
+              const r = Math.max(0.15, Math.min(1.4, Number(v) || 0.75));
+              callbacks?.onRenderSettingsChange?.({ cyclesRoughnessFactor: r });
+              logs.push(`[Blender 5.2 Cycles]: Multiplicador de rugosidad ajustado a ${r.toFixed(2)}.`);
+            } else if (p === 'ior') {
+              const ior = Math.max(1.0, Math.min(2.4, Number(v) || 1.5));
+              callbacks?.onRenderSettingsChange?.({ cyclesIor: ior });
+              logs.push(`[Blender 5.2 Cycles]: Índice de refracción IOR ajustado a ${ior.toFixed(2)}.`);
+            } else if (p === 'gi_bounce' || p === 'max_bounces') {
+              const raw = Number(v) || 1.35;
+              const gi = raw > 3 ? Math.min(2.4, 0.8 + raw * 0.12) : Math.max(0.6, Math.min(2.4, raw));
+              callbacks?.onRenderSettingsChange?.({ cyclesGiBounceBoost: gi });
+              logs.push(`[Blender 5.2 Cycles]: Rebote de luz indirecta (GI) ajustado a ${gi.toFixed(2)}x.`);
+            } else if (p === 'progressive_accum' || p === 'use_progressive_refine') {
+              const prog = Boolean(v);
+              callbacks?.onRenderSettingsChange?.({ cyclesProgressiveAccum: prog });
+              logs.push(`[Blender 5.2 Cycles]: Acumulación progresiva Monte Carlo = ${prog ? 'ON' : 'OFF'}.`);
+            }
+            return true;
+          },
+        }
+      ),
+      eevee: new Proxy(
+        {
+          use_bloom: true,
+          bloom_intensity: 0.45,
+          env_intensity: 1.45,
+          use_ssr: true,
+          use_gtao: true,
+        },
+        {
+          get(t, p) {
+            if (p in t) return (t as any)[p];
+            return createSafeNoopProxy();
+          },
+          set(t, p, v) {
+            (t as any)[p] = v;
+            if (p === 'bloom_intensity') {
+              const b = Math.max(0, Math.min(1.8, Number(v) || 0.45));
+              callbacks?.onRenderSettingsChange?.({ eeveeBloomIntensity: b });
+              logs.push(`[Blender 5.2 EEVEE]: Intensidad de Bloom ajustada a ${b.toFixed(2)}.`);
+            } else if (p === 'env_intensity' || p === 'ibl_intensity') {
+              const env = Math.max(0.2, Math.min(3.0, Number(v) || 1.45));
+              callbacks?.onRenderSettingsChange?.({ eeveeEnvIntensity: env });
+              logs.push(`[Blender 5.2 EEVEE]: Reflejos HDRI IBL ajustados a ${env.toFixed(2)}x.`);
+            } else if (p === 'use_bloom' && v === false) {
+              callbacks?.onRenderSettingsChange?.({ eeveeBloomIntensity: 0 });
+            }
+            return true;
+          },
+        }
+      ),
+      world: worldProxyObj,
       frame_start: 1,
       frame_end: 250,
       frame_current: 1,
@@ -3588,34 +5594,153 @@ export async function executeBlenderPythonScript(
     }
   );
 
+  const handleAnimWater = (...rawArgs: unknown[]) => {
+    const opts = extractPyArgs(
+      rawArgs,
+      ['objeto', 'speed', 'amplitude', 'frequency', 'color'],
+      { speed: 1.8, amplitude: 0.05, frequency: 3.2 }
+    );
+    const cand = opts.objeto ?? opts.object ?? opts.obj ?? rawArgs[0];
+    const hasExplicitMesh =
+      cand &&
+      typeof cand === 'object' &&
+      ('_threeMesh' in (cand as any) || '_threeObject' in (cand as any) || (cand as any).isMesh);
+    const objProxy = hasExplicitMesh ? (cand as any) : currentActiveObjProxy;
+    const mesh: THREE.Mesh | undefined =
+      objProxy?._threeMesh ?? objProxy?._threeObject ?? (objProxy?.isMesh ? objProxy : undefined);
+    if (!mesh || !(mesh as THREE.Mesh).isMesh) return;
+
+    const speedVal = Number(opts.velocidad ?? opts.speed ?? (typeof rawArgs[1] === 'number' ? rawArgs[1] : 1.8)) || 1.8;
+    const ampVal = Number(opts.amplitud ?? opts.amplitude ?? 0.05);
+    const freqVal = Number(opts.frecuencia ?? opts.frequency ?? 3.2);
+
+    const origMat = (mesh.userData.originalMaterial || mesh.material) as THREE.MeshStandardMaterial | undefined;
+    const baseColor = opts.color
+      ? parsePythonColor(opts.color, '#38bdf8')
+      : origMat && origMat.color
+      ? origMat.color.clone()
+      : new THREE.Color('#38bdf8');
+
+    setBlenderWater(mesh, baseColor, speedVal, ampVal, freqVal);
+    logs.push(
+      `bpy.anim.water(object='${mesh.name}', speed=${speedVal}, amplitude=${ampVal}, frequency=${freqVal})`
+    );
+  };
+
+  const handleAnimLoop = (...rawArgs: unknown[]) => {
+    const opts = extractPyArgs(
+      rawArgs,
+      ['objeto', 'duracion', 'funcion', 'type', 'speed', 'amplitude', 'axis'],
+      { duracion: 1.0, speed: 1.0, amplitude: 0.15, axis: 'Y' }
+    );
+    const cand = opts.objeto ?? opts.object ?? opts.obj ?? rawArgs[0];
+    const hasExplicitObj =
+      cand &&
+      typeof cand === 'object' &&
+      ('_threeMesh' in (cand as any) || '_threeObject' in (cand as any) || (cand as any).isObject3D);
+    const objProxy = hasExplicitObj ? (cand as any) : currentActiveObjProxy;
+    const mesh: THREE.Object3D | undefined =
+      objProxy?._threeMesh ?? objProxy?._threeObject ?? (objProxy?.isObject3D ? objProxy : undefined);
+    if (!mesh) return;
+
+    const fnCandidate =
+      opts.funcion ??
+      opts.fn ??
+      opts.callback ??
+      (typeof rawArgs[2] === 'function'
+        ? rawArgs[2]
+        : typeof rawArgs[1] === 'function'
+        ? rawArgs[1]
+        : undefined);
+
+    if (typeof fnCandidate === 'function') {
+      const duracion = Number(opts.duracion ?? opts.duration ?? (typeof rawArgs[1] === 'number' ? rawArgs[1] : 1.0)) || 1.0;
+      addBlenderLoop({
+        object: mesh,
+        base: mesh.position.clone(),
+        scale: 1,
+        duration: Math.max(0.1, duracion),
+        presetType: 'CALLBACK',
+        sample: (t: number): [number, number, number] => {
+          const r = fnCandidate.length >= 2 ? fnCandidate(objProxy, t) : fnCandidate(t);
+          if (Array.isArray(r) && r.length >= 3 && typeof r[0] === 'number') {
+            return [Number(r[0]) || 0, Number(r[1]) || 0, Number(r[2]) || 0];
+          }
+          return [0, 0, 0];
+        },
+        toThree: (v: [number, number, number]): [number, number, number] =>
+          isZUp ? [v[0], v[2], -v[1]] : [v[0], v[1], v[2]],
+      });
+      logs.push(`bpy.anim.loop(object='${mesh.name}', duration=${duracion})`);
+      return;
+    }
+
+    // Modo por tipo predefinido: 'TURNTABLE', 'HOVER', 'PULSE', 'PENDULUM', 'ORBIT'
+    const rawType = String(
+      opts.type ?? opts.mode ?? opts.tipo ?? (typeof rawArgs[1] === 'string' ? rawArgs[1] : 'TURNTABLE')
+    ).toUpperCase();
+    let presetType: 'TURNTABLE' | 'HOVER' | 'PULSE' | 'PENDULUM' | 'ORBIT' = 'TURNTABLE';
+    if (rawType.includes('HOVER') || rawType.includes('FLOAT') || rawType.includes('BOB') || rawType.includes('WAVE')) {
+      presetType = 'HOVER';
+    } else if (rawType.includes('PULSE') || rawType.includes('SCALE') || rawType.includes('BREATH')) {
+      presetType = 'PULSE';
+    } else if (rawType.includes('PENDULUM') || rawType.includes('SWING') || rawType.includes('ROCK')) {
+      presetType = 'PENDULUM';
+    } else if (rawType.includes('ORBIT') || rawType.includes('CIRCLE')) {
+      presetType = 'ORBIT';
+    } else {
+      presetType = 'TURNTABLE';
+    }
+
+    const speedVal = Number(opts.speed ?? opts.velocidad ?? 1.0) || 1.0;
+    const ampVal = Number(opts.amplitude ?? opts.amplitud ?? 0.15);
+    const rawAxis = String(opts.axis ?? opts.eje ?? 'Y').toUpperCase();
+    // Si el script está en Z-Up y pide rotar sobre 'Z' (vertical de Blender), en Three.js el eje vertical es 'Y'
+    let threeAxis: 'X' | 'Y' | 'Z' = 'Y';
+    if (rawAxis === 'X') threeAxis = 'X';
+    else if (rawAxis === 'Z') threeAxis = isZUp ? 'Y' : 'Z';
+    else if (rawAxis === 'Y') threeAxis = isZUp ? 'Y' : 'Y';
+
+    addBlenderLoop({
+      object: mesh,
+      base: mesh.position.clone(),
+      baseRot: mesh.rotation.clone(),
+      baseScale: mesh.scale.clone(),
+      scale: 1,
+      duration: Math.max(0.2, 2.0 / Math.max(0.1, Math.abs(speedVal))),
+      presetType,
+      speed: speedVal,
+      amplitude: ampVal,
+      axis: threeAxis,
+      sample: () => [0, 0, 0],
+      toThree: (v) => v,
+    });
+    logs.push(
+      `bpy.anim.loop(object='${mesh.name}', type='${presetType}', speed=${speedVal}, amplitude=${ampVal})`
+    );
+  };
+
+  const animModuleProxy = createSafeNoopProxy({
+    water: handleAnimWater,
+    agua: handleAnimWater,
+    ocean: handleAnimWater,
+    waves: handleAnimWater,
+    loop: handleAnimLoop,
+    animate: handleAnimLoop,
+    turntable: (...args: unknown[]) => handleAnimLoop(...args, { __isKw: true, type: 'TURNTABLE' }),
+    rotate: (...args: unknown[]) => handleAnimLoop(...args, { __isKw: true, type: 'TURNTABLE' }),
+    spin: (...args: unknown[]) => handleAnimLoop(...args, { __isKw: true, type: 'TURNTABLE' }),
+    hover: (...args: unknown[]) => handleAnimLoop(...args, { __isKw: true, type: 'HOVER' }),
+    float: (...args: unknown[]) => handleAnimLoop(...args, { __isKw: true, type: 'HOVER' }),
+    pulse: (...args: unknown[]) => handleAnimLoop(...args, { __isKw: true, type: 'PULSE' }),
+    pendulum: (...args: unknown[]) => handleAnimLoop(...args, { __isKw: true, type: 'PENDULUM' }),
+    orbit: (...args: unknown[]) => handleAnimLoop(...args, { __isKw: true, type: 'ORBIT' }),
+  });
+
   const bpy = {
     _extractArgs: extractPyArgs,
-    // Animaciones: bpy.anim.loop(objeto, duracion, funcion(t)) y bpy.anim.agua(objeto)
-    anim: {
-      loop: (objProxy: any, duracion: any, funcion: any) => {
-        const mesh: THREE.Object3D | undefined = objProxy?._threeMesh ?? objProxy;
-        if (!mesh || typeof funcion !== 'function') return;
-        addBlenderLoop({
-          object: mesh,
-          base: mesh.position.clone(),
-          scale: 1,
-          duration: Math.max(0.1, Number(duracion) || 1.0),
-          sample: (t: number): [number, number, number] => {
-            const r = funcion(t);
-            return [Number(r[0]) || 0, Number(r[1]) || 0, Number(r[2]) || 0];
-          },
-          toThree: (v: [number, number, number]): [number, number, number] =>
-            isZUp ? [v[0], v[2], -v[1]] : [v[0], v[1], v[2]],
-        });
-      },
-      agua: (objProxy: any, velocidad: any = 1.0) => {
-        const mesh: THREE.Mesh | undefined = objProxy?._threeMesh;
-        if (!mesh || !(mesh as THREE.Mesh).isMesh) return;
-        const mat = mesh.material as THREE.MeshStandardMaterial;
-        const color = mat && mat.color ? mat.color.clone() : new THREE.Color('#38bdf8');
-        setBlenderWater(mesh, color, Number(velocidad) || 1.0);
-      },
-    },
+    // Animaciones en vivo a 60 FPS: bpy.anim.water / bpy.anim.agua y bpy.anim.loop
+    anim: animModuleProxy,
     _get: (obj: any, key: any, defVal: any = null) => {
       if (obj == null) return defVal;
       if (typeof obj.get === 'function') {
@@ -3699,10 +5824,20 @@ export async function executeBlenderPythonScript(
         return isStr ? res.join('') : res;
       }
     },
-    _sliceAssign: (target: any, start: number, stop: number | null, val: any) => {
+    _sliceAssign: (target: any, startOrVal: any, stop?: number | null, val?: any) => {
       if (!target || typeof target !== 'object') return target;
+      if (stop === undefined && val === undefined) {
+        // Caso 2 argumentos: `arr[:] = val`
+        const vals = Array.isArray(startOrVal) ? startOrVal : Array.from(startOrVal || []);
+        if (Array.isArray(target)) {
+          target.splice(0, target.length, ...vals);
+        } else {
+          for (let i = 0; i < vals.length; i++) target[i] = vals[i];
+        }
+        return target;
+      }
       const vals = Array.isArray(val) ? val : Array.from(val || []);
-      const s = Math.max(0, Number(start) || 0);
+      const s = Math.max(0, Number(startOrVal) || 0);
       const e = stop == null ? s + vals.length : Number(stop);
       for (let i = s; i < e && i - s < vals.length; i++) {
         target[i] = vals[i - s];
@@ -3744,34 +5879,35 @@ export async function executeBlenderPythonScript(
       return Number(a) - Number(b);
     },
     _matmul: (a: any, b: any) => {
-      if (Array.isArray(a) && a.length === 4 && Array.isArray(a[0])) {
-        // 4x4 Matrix @ 4x4 Matrix
-        if (Array.isArray(b) && b.length === 4 && Array.isArray(b[0])) {
+      if (Array.isArray(a) && (a.length === 4 || a.length === 3) && Array.isArray(a[0])) {
+        // Matrix @ Matrix
+        if (Array.isArray(b) && (b.length === 4 || b.length === 3) && Array.isArray(b[0])) {
           const out = [
             [0, 0, 0, 0],
             [0, 0, 0, 0],
             [0, 0, 0, 0],
-            [0, 0, 0, 0],
+            [0, 0, 0, 1],
           ];
-          for (let r = 0; r < 4; r++) {
-            for (let c = 0; c < 4; c++) {
-              out[r][c] =
-                (a[r][0] || 0) * (b[0][c] || 0) +
-                (a[r][1] || 0) * (b[1][c] || 0) +
-                (a[r][2] || 0) * (b[2][c] || 0) +
-                (a[r][3] || 0) * (b[3][c] || 0);
+          const dim = Math.min(a.length, b.length);
+          for (let r = 0; r < dim; r++) {
+            for (let c = 0; c < dim; c++) {
+              let sum = 0;
+              for (let k = 0; k < dim; k++) {
+                sum += (a[r]?.[k] || 0) * (b[k]?.[c] || 0);
+              }
+              out[r][c] = sum;
             }
           }
           return out;
         }
-        // 4x4 Matrix @ 3D Vector
+        // Matrix @ 3D Vector
         if (Array.isArray(b) || (b && typeof b === 'object')) {
           const x = Number(b[0] ?? b.x ?? 0);
           const y = Number(b[1] ?? b.y ?? 0);
           const z = Number(b[2] ?? b.z ?? 0);
-          const rx = a[0][0] * x + a[0][1] * y + a[0][2] * z + (a[0][3] ?? 0);
-          const ry = a[1][0] * x + a[1][1] * y + a[1][2] * z + (a[1][3] ?? 0);
-          const rz = a[2][0] * x + a[2][1] * y + a[2][2] * z + (a[2][3] ?? 0);
+          const rx = (a[0]?.[0] ?? 1) * x + (a[0]?.[1] ?? 0) * y + (a[0]?.[2] ?? 0) * z + (a[0]?.[3] ?? 0);
+          const ry = (a[1]?.[0] ?? 0) * x + (a[1]?.[1] ?? 1) * y + (a[1]?.[2] ?? 0) * z + (a[1]?.[3] ?? 0);
+          const rz = (a[2]?.[0] ?? 0) * x + (a[2]?.[1] ?? 0) * y + (a[2]?.[2] ?? 1) * z + (a[2]?.[3] ?? 0);
           return createMathutilsVector([rx, ry, rz]);
         }
       }
@@ -3897,18 +6033,35 @@ export async function executeBlenderPythonScript(
         return mat;
       }),
       objects: createDataCollection(allObjectProxies, (...rawArgs: unknown[]) => {
-        const { name: objName, object_data: meshData, color } = extractPyArgs(
+        const opts = extractPyArgs(
           rawArgs,
-          ['name', 'object_data', 'color'],
+          ['name', 'object_data', 'color', 'data', 'mesh'],
           { name: 'Object', object_data: null, color: '#38bdf8' }
         );
-        const geo = meshData?._geometry || new THREE.BufferGeometry();
+        const objName = opts.name;
+        const meshData = opts.object_data ?? opts.data ?? opts.mesh ?? null;
+        const color = opts.color;
+        if (meshData && meshData._threeLight) {
+          return createBlenderLightObject(String(objName), meshData.type || 'SUN');
+        }
+        const geo = meshData?._threeGeometry || meshData?._geometry || new THREE.BufferGeometry();
         const col = parsePythonColor(color, '#38bdf8');
         const mesh = new THREE.Mesh(geo);
         mesh.name = String(objName);
         configureNewlySpawnedMesh(mesh, col, gradientTex, outThick, outOpac);
         const proxy = createBlenderObjectProxy(mesh);
         (proxy as any)._color = col;
+        (proxy as any)._threeObject = mesh;
+        (proxy as any)._meshData = meshData;
+        if (meshData) {
+          meshData._threeMesh = mesh;
+          meshData._geometry = mesh.geometry;
+          meshData._ownerProxy = proxy;
+          if (typeof meshData.from_pydata === 'function') {
+            (proxy.data as any).from_pydata = meshData.from_pydata;
+            (proxy.data as any)._syncGeometryToBoundMesh = meshData._syncGeometryToBoundMesh;
+          }
+        }
         if (Array.isArray(meshData?.materials) && meshData.materials.length > 0) {
           (proxy as any)._pendingMaterials = [...meshData.materials];
           meshData.materials.forEach((m: any) => (proxy.data.materials as any).append(m));
@@ -3953,9 +6106,13 @@ export async function executeBlenderPythonScript(
         };
       }),
       armatures: createDataCollection([], () => createSafeNoopProxy()),
-      lights: createDataCollection([], () => createSafeNoopProxy()),
+      lights: createDataCollection([], (...rawArgs: unknown[]) => {
+        const { name, type } = extractPyArgs(rawArgs, ['name', 'type'], { name: 'Light', type: 'SUN' });
+        const lightObj = createBlenderLightObject(String(name), String(type));
+        return lightObj.data;
+      }),
       cameras: createDataCollection([], () => createSafeNoopProxy()),
-      worlds: createDataCollection([], () => createSafeNoopProxy()),
+      worlds: createDataCollection([worldProxyObj], () => worldProxyObj),
     },
     ops: {
       object: {
@@ -3988,7 +6145,7 @@ export async function executeBlenderPythonScript(
         },
         transform_apply: (opts?: { location?: boolean; rotation?: boolean; scale?: boolean }) => {
           const mesh: THREE.Mesh | undefined = currentActiveObjProxy?._threeMesh;
-          if (!mesh) return;
+          if (!mesh || !mesh.geometry) return;
           if (opts?.scale !== false) {
             mesh.geometry.scale(mesh.scale.x, mesh.scale.y, mesh.scale.z);
             mesh.scale.set(1, 1, 1);
@@ -4013,9 +6170,40 @@ export async function executeBlenderPythonScript(
             await applyPendingModifiersForObject(currentActiveObjProxy);
           }
         },
-        light_add: () => createSafeNoopProxy(),
+        light_add: (...rawArgs: unknown[]) => {
+          const opts = extractPyArgs(
+            rawArgs,
+            ['type', 'radius', 'align', 'location', 'rotation', 'scale'],
+            { type: 'SUN', location: [4, -4, 6], rotation: [0.5, 0.2, 0.4] }
+          );
+          return createBlenderLightObject(
+            `Light_${opts.type || 'SUN'}`,
+            String(opts.type || 'SUN'),
+            opts.location,
+            opts.rotation
+          );
+        },
         camera_add: () => createSafeNoopProxy(),
-        empty_add: () => createSafeNoopProxy(),
+        empty_add: (...rawArgs: unknown[]) => {
+          const opts = extractPyArgs(
+            rawArgs,
+            ['type', 'radius', 'align', 'location', 'rotation', 'scale'],
+            { type: 'PLAIN_AXES', location: [0, 0, 0], rotation: [0, 0, 0] }
+          );
+          const emptyMesh = new THREE.Mesh(new THREE.BufferGeometry());
+          emptyMesh.name = `Empty_${objectsCreatedCount + 1}`;
+          if (Array.isArray(opts.location)) {
+            const [tx, ty, tz] = convertLocToThree(opts.location);
+            emptyMesh.position.set(tx, ty, tz);
+          }
+          if (Array.isArray(opts.rotation)) {
+            const [rx, ry, rz] = convertRotToThree(opts.rotation);
+            emptyMesh.rotation.set(rx, ry, rz);
+          }
+          currentActiveObjProxy = createBlenderObjectProxy(emptyMesh);
+          currentActiveObjProxy.type = 'EMPTY';
+          return currentActiveObjProxy;
+        },
         armature_add: () => createSafeNoopProxy(),
         text_add: () => createSafeNoopProxy(),
         metaball_add: (...rawArgs: unknown[]) => {
@@ -4041,6 +6229,7 @@ export async function executeBlenderPythonScript(
             });
             targetParent.remove(child);
           });
+          worldEnvLight = null;
           targetParent.scale.setScalar(1);
           targetParent.position.set(0, -1.35, 0);
           targetParent.rotation.set(0, 0, 0);
@@ -4339,10 +6528,21 @@ export async function executeBlenderPythonScript(
             {}
           );
 
-          // Soportar tanto formato (start_pos, mid_pos, end_pos) como formato paramétrico (span, upper_len, lower_len, y_top)
-          let sPos: [number, number, number] = opts.start_pos ?? [0.42, 1.58, 0.0];
-          let mPos: [number, number, number] = opts.mid_pos ?? [0.78, 1.18, 0.12];
-          let ePos: [number, number, number] = opts.end_pos ?? [0.72, 0.72, 0.34];
+          // Soportar tanto formato (start_pos, mid_pos, end_pos) en Z-Up o Y-Up como formato paramétrico
+          const toThreePt = (pt: [number, number, number], fallbackThree: [number, number, number]): [number, number, number] => {
+            if (!pt || !Array.isArray(pt)) return fallbackThree;
+            return convertLocToThree(pt);
+          };
+
+          let sPos: [number, number, number] = opts.start_pos
+            ? toThreePt(opts.start_pos, [0.42, 1.58, 0.0])
+            : [0.42, 1.58, 0.0];
+          let mPos: [number, number, number] = opts.mid_pos
+            ? toThreePt(opts.mid_pos, [0.78, 1.18, 0.12])
+            : [0.78, 1.18, 0.12];
+          let ePos: [number, number, number] = opts.end_pos
+            ? toThreePt(opts.end_pos, [0.72, 0.72, 0.34])
+            : [0.72, 0.72, 0.34];
 
           if (!opts.start_pos && opts.span !== undefined) {
             const span = Number(opts.span) || 0.38;
@@ -4380,6 +6580,7 @@ export async function executeBlenderPythonScript(
               location: [center.x, center.y, center.z],
               rotation: [euler.x, euler.y, euler.z],
               color: col,
+              alreadyThreeSpace: true,
             });
           };
 
@@ -4391,16 +6592,19 @@ export async function executeBlenderPythonScript(
             spawnPrimitiveMesh('JointTop', new THREE.IcosahedronGeometry(jSize, 2), {
               location: [pStart.x, pStart.y, pStart.z],
               color: jCol,
+              alreadyThreeSpace: true,
             });
             createSegmentBetween(pStart, pMid, thick, mainCol);
             spawnPrimitiveMesh('JointMid', new THREE.IcosahedronGeometry(jSize * 0.88, 2), {
               location: [pMid.x, pMid.y, pMid.z],
               color: jCol,
+              alreadyThreeSpace: true,
             });
             createSegmentBetween(pMid, pEnd, thick * 0.85, mainCol);
             spawnPrimitiveMesh('LimbEnd', new THREE.DodecahedronGeometry(jSize * 0.92, 1), {
               location: [pEnd.x, pEnd.y, pEnd.z],
               color: jCol,
+              alreadyThreeSpace: true,
             });
           }
           logs.push(`bpy.ops.mesh.primitive_limb_pair_add: Par de extremidades articuladas simétricas generadas.`);
@@ -4408,13 +6612,18 @@ export async function executeBlenderPythonScript(
         primitive_wing_pair_add: (...rawArgs: unknown[]) => {
           const opts = extractPyArgs(
             rawArgs,
-            ['span', 'feathers', 'y_height', 'z_offset', 'spread', 'color', 'accent_color', 'y_pos', 'z_pos'],
+            ['span', 'feathers', 'y_height', 'z_offset', 'spread', 'color', 'accent_color', 'y_pos', 'z_pos', 'location'],
             { span: 1.9, feathers: 6, y_height: 1.65, z_offset: -0.28, spread: 0.9 }
           );
           const span = Number(opts.span ?? 1.9);
           const feathers = Math.min(12, Math.max(3, Number(opts.feathers ?? 6)));
-          const yHeight = Number(opts.y_height ?? opts.y_pos ?? 1.65);
-          const zOffset = Number(opts.z_offset ?? opts.z_pos ?? -0.28);
+          let yHeight = Number(opts.y_height ?? opts.y_pos ?? 1.65);
+          let zOffset = Number(opts.z_offset ?? opts.z_pos ?? -0.28);
+          if (Array.isArray(opts.location)) {
+            const [_, ty, tz] = convertLocToThree(opts.location);
+            yHeight = ty;
+            zOffset = tz;
+          }
           const spread = Number(opts.spread ?? 0.9);
           const colMain = opts.color ?? [0.9, 0.16, 0.32];
           const colAcc = opts.accent_color ?? [0.98, 0.74, 0.14];
@@ -4429,14 +6638,22 @@ export async function executeBlenderPythonScript(
               const pz = zOffset - t * 0.18;
               const fLen = span * (0.68 - t * 0.28);
 
-              bpy.ops.mesh.primitive_blade_add({
-                length: fLen,
-                width: 0.18,
-                thickness: 0.045,
-                curve: 0.12 * side,
+              const geo = new THREE.BoxGeometry(0.18, fLen, 0.045, 4, 14, 2);
+              const pos = geo.attributes.position as THREE.BufferAttribute;
+              const halfLen = fLen / 2;
+              const curve = 0.12 * side;
+              for (let k = 0; k < pos.count; k++) {
+                const vx = pos.getX(k), vy = pos.getY(k), vz = pos.getZ(k);
+                const u = (vy + halfLen) / Math.max(0.001, fLen);
+                const taperW = u > 0.7 ? 1.0 - ((u - 0.7) / 0.3) * 0.92 : 1.0 + Math.sin(u * Math.PI) * 0.15;
+                pos.setXYZ(k, vx * taperW + Math.pow(u, 1.8) * curve, vy, vz * (1 - u * 0.5));
+              }
+              geo.computeVertexNormals();
+              spawnPrimitiveMesh('WingFeather', geo, {
                 location: [px, py, pz],
                 rotation: [0.18, -0.2 * side, -angle],
                 color: i % 2 === 0 ? colMain : colAcc,
+                alreadyThreeSpace: true,
               });
             }
           }
@@ -4445,36 +6662,42 @@ export async function executeBlenderPythonScript(
         primitive_wheel_pair_add: (...rawArgs: unknown[]) => {
           const opts = extractPyArgs(
             rawArgs,
-            ['radius', 'width', 'span', 'y_pos', 'z_pos', 'color', 'rim_color'],
+            ['radius', 'width', 'span', 'y_pos', 'z_pos', 'color', 'rim_color', 'location'],
             { radius: 0.42, width: 0.26, span: 0.78, y_pos: 0.42, z_pos: 0.0 }
           );
           const r = Number(opts.radius ?? 0.42);
           const w = Number(opts.width ?? 0.26);
           const span = Number(opts.span ?? 0.78);
-          const yPos = Number(opts.y_pos ?? 0.42);
-          const zPos = Number(opts.z_pos ?? 0.0);
+          let yPos = Number(opts.y_pos ?? 0.42);
+          let zPos = Number(opts.z_pos ?? 0.0);
+          if (Array.isArray(opts.location)) {
+            const [_, ty, tz] = convertLocToThree(opts.location);
+            yPos = ty;
+            zPos = tz;
+          }
           const tireCol = opts.color ?? [0.15, 0.17, 0.22];
           const rimCol = opts.rim_color ?? [0.95, 0.72, 0.15];
 
-          // Eje central de conexión
+          // Eje central de conexión (en coordenadas Three.js Y-Up directas)
           spawnPrimitiveMesh('Axle', new THREE.CylinderGeometry(r * 0.16, r * 0.16, span * 2, 12), {
             location: [0, yPos, zPos],
             rotation: [0, 0, Math.PI / 2],
             color: tireCol,
+            alreadyThreeSpace: true,
           });
 
           for (const side of [-1, 1]) {
-            // Neumático / Rueda exterior
             spawnPrimitiveMesh('WheelTire', new THREE.CylinderGeometry(r, r, w, 24), {
               location: [side * span, yPos, zPos],
               rotation: [0, 0, Math.PI / 2],
               color: tireCol,
+              alreadyThreeSpace: true,
             });
-            // Llanta interior metálica
             spawnPrimitiveMesh('WheelRim', new THREE.CylinderGeometry(r * 0.58, r * 0.58, w * 1.08, 16), {
               location: [side * span, yPos, zPos],
               rotation: [0, 0, Math.PI / 2],
               color: rimCol,
+              alreadyThreeSpace: true,
             });
           }
           logs.push(`bpy.ops.mesh.primitive_wheel_pair_add: Par de ruedas y eje generados.`);
@@ -4483,12 +6706,13 @@ export async function executeBlenderPythonScript(
           const opts = extractPyArgs(
             rawArgs,
             ['width', 'height', 'thickness', 'location', 'rotation', 'color', 'accent_color'],
-            { width: 1.4, height: 1.8, thickness: 0.26, location: [0, 0.2, 0] }
+            { width: 1.4, height: 1.8, thickness: 0.26, location: [0, 0, 0] }
           );
           const width = Number(opts.width ?? 1.4);
           const height = Number(opts.height ?? 1.8);
           const thick = Number(opts.thickness ?? 0.26);
-          const loc = Array.isArray(opts.location) ? opts.location : [0, 0.2, 0];
+          const rawLoc = Array.isArray(opts.location) ? opts.location : [0, 0, 0];
+          const loc = convertLocToThree(rawLoc);
           const colMain = opts.color ?? [0.58, 0.62, 0.70];
           const colAcc = opts.accent_color ?? [0.95, 0.72, 0.16];
 
@@ -4496,23 +6720,23 @@ export async function executeBlenderPythonScript(
           const pillarH = height * 0.65;
 
           for (const side of [-1, 1]) {
-            // Columna vertical
             spawnPrimitiveMesh('ArchPillar', new THREE.BoxGeometry(thick, pillarH, thick, 2, 4, 2), {
               location: [loc[0] + side * halfSpan, loc[1] + pillarH * 0.5, loc[2]],
               color: colMain,
+              alreadyThreeSpace: true,
             });
-            // Base y capitel de la columna
             spawnPrimitiveMesh('PillarBase', new THREE.BoxGeometry(thick * 1.35, thick * 0.45, thick * 1.35), {
               location: [loc[0] + side * halfSpan, loc[1] + thick * 0.22, loc[2]],
               color: colAcc,
+              alreadyThreeSpace: true,
             });
             spawnPrimitiveMesh('PillarCap', new THREE.BoxGeometry(thick * 1.35, thick * 0.45, thick * 1.35), {
               location: [loc[0] + side * halfSpan, loc[1] + pillarH, loc[2]],
               color: colAcc,
+              alreadyThreeSpace: true,
             });
           }
 
-          // Dovelas del arco superior semicircular
           const archSteps = 7;
           for (let i = 0; i < archSteps; i++) {
             const t = i / (archSteps - 1);
@@ -4527,6 +6751,7 @@ export async function executeBlenderPythonScript(
                 location: [ax, ay, loc[2]],
                 rotation: [0, 0, ang - Math.PI / 2],
                 color: isKeystone ? colAcc : colMain,
+                alreadyThreeSpace: true,
               }
             );
           }
@@ -4536,11 +6761,16 @@ export async function executeBlenderPythonScript(
           const opts = extractPyArgs(
             rawArgs,
             ['radius', 'layers', 'location', 'color', 'accent_color'],
-            { radius: 0.95, layers: 3, location: [0, 2.0, 0] }
+            { radius: 0.95, layers: 3, location: isZUp ? [0, 0, 2.0] : [0, 2.0, 0] }
           );
           const rad = Number(opts.radius ?? 0.95);
           const layers = Math.min(6, Math.max(2, Number(opts.layers ?? 3)));
-          const loc = Array.isArray(opts.location) ? opts.location : [0, 2.0, 0];
+          const rawLoc = Array.isArray(opts.location)
+            ? opts.location
+            : isZUp
+            ? [0, 0, 2.0]
+            : [0, 2.0, 0];
+          const loc = convertLocToThree(rawLoc);
           const colMain = opts.color ?? [0.18, 0.76, 0.36];
           const colAcc = opts.accent_color ?? [0.36, 0.90, 0.46];
 
@@ -4552,6 +6782,7 @@ export async function executeBlenderPythonScript(
               location: [loc[0], ly, loc[2]],
               scale: [1.15, 0.72, 1.15],
               color: i % 2 === 0 ? colMain : colAcc,
+              alreadyThreeSpace: true,
             });
           }
           logs.push(`bpy.ops.mesh.primitive_tree_foliage_add: Copa de follaje estilizado en ${layers} capas creada.`);
@@ -4560,36 +6791,42 @@ export async function executeBlenderPythonScript(
           const opts = extractPyArgs(
             rawArgs,
             ['width', 'height', 'depth', 'location', 'color', 'accent_color'],
-            { width: 1.35, height: 0.9, depth: 0.88, location: [0, 0.5, 0] }
+            { width: 1.35, height: 0.9, depth: 0.88, location: isZUp ? [0, 0, 0.5] : [0, 0.5, 0] }
           );
           const w = Number(opts.width ?? 1.35);
           const h = Number(opts.height ?? 0.9);
           const d = Number(opts.depth ?? 0.88);
-          const loc = Array.isArray(opts.location) ? opts.location : [0, 0.5, 0];
+          const rawLoc = Array.isArray(opts.location)
+            ? opts.location
+            : isZUp
+            ? [0, 0, 0.5]
+            : [0, 0.5, 0];
+          const loc = convertLocToThree(rawLoc);
           const woodCol = opts.color ?? [0.48, 0.24, 0.10];
           const metalCol = opts.accent_color ?? [0.96, 0.74, 0.14];
 
-          // Caja base del cofre
           spawnPrimitiveMesh('ChestBase', new THREE.BoxGeometry(w, h * 0.62, d, 4, 4, 4), {
             location: [loc[0], loc[1], loc[2]],
             color: woodCol,
+            alreadyThreeSpace: true,
           });
-          // Tapa cilíndrica abovedada superior
           spawnPrimitiveMesh('ChestLid', new THREE.CylinderGeometry(d * 0.5, d * 0.5, w * 0.98, 18), {
             location: [loc[0], loc[1] + h * 0.31, loc[2]],
             rotation: [0, 0, Math.PI / 2],
             color: woodCol,
+            alreadyThreeSpace: true,
           });
-          // Herrajes laterales dorados y cerradura frontal
           for (const side of [-1, 1]) {
             spawnPrimitiveMesh('ChestBand', new THREE.BoxGeometry(w * 0.12, h * 0.68, d * 1.05), {
               location: [loc[0] + side * (w * 0.36), loc[1] + h * 0.04, loc[2]],
               color: metalCol,
+              alreadyThreeSpace: true,
             });
           }
           spawnPrimitiveMesh('ChestLock', new THREE.BoxGeometry(w * 0.18, h * 0.28, d * 0.12), {
             location: [loc[0], loc[1] + h * 0.22, loc[2] + d * 0.52],
             color: metalCol,
+            alreadyThreeSpace: true,
           });
           logs.push(`bpy.ops.mesh.primitive_prop_chest_add: Cofre / contenedor 3D generado.`);
         },
@@ -4598,10 +6835,63 @@ export async function executeBlenderPythonScript(
           totalVerticesModified += affected;
           proxiesDirty = true;
         },
+        subdivide_triangles: (...rawArgs: unknown[]) => {
+          const opts = extractPyArgs(rawArgs, ['segments', 'mode', 'object'], { segments: 2 });
+          const rawSeg = opts.segments ?? opts.mode ?? 2;
+          const mode: TriangleSubdivideMode =
+            rawSeg === 3 || rawSeg === '3' || String(rawSeg).toLowerCase() === 'poke'
+              ? 3
+              : rawSeg === 4 || rawSeg === '4' || String(rawSeg).toLowerCase() === 'quad'
+              ? 4
+              : 2;
+          const targetObj = opts.object?._threeMesh || modelWrapper;
+          const res = segmentAllModelTriangles(targetObj, mode);
+          proxiesDirty = true;
+          logs.push(
+            `bpy.ops.mesh.subdivide_triangles(segments=${mode}): ${res.beforeTriangles} → ${res.afterTriangles} triángulos.`
+          );
+        },
+        paint_triangles: (...rawArgs: unknown[]) => {
+          const opts = extractPyArgs(rawArgs, ['color', 'face_indices', 'object'], {
+            color: [0.22, 0.74, 0.98],
+          });
+          const col = parsePythonColor(opts.color, '#38bdf8');
+          const targetMesh: THREE.Mesh | undefined =
+            opts.object?._threeMesh || currentActiveObjProxy?._threeMesh;
+          if (targetMesh && targetMesh.isMesh) {
+            applyMaterialToThreeMesh(targetMesh, col);
+            logs.push(`bpy.ops.mesh.paint_triangles: Pintura aplicada en '${targetMesh.name}'.`);
+          }
+        },
         bevel: () => {
           const affected = applyGlobalLaplacianSmoothing(modelWrapper, 1, 0.25);
           totalVerticesModified += affected;
           proxiesDirty = true;
+        },
+        flip_normals: () => {
+          const mesh: THREE.Mesh | undefined = currentActiveObjProxy?._threeMesh;
+          if (mesh && mesh.isMesh) {
+            const stdMat = mesh.userData.originalMaterial as THREE.MeshPhysicalMaterial | undefined;
+            const toonMat = mesh.userData.toonMaterial as THREE.MeshToonMaterial | undefined;
+            if (stdMat) {
+              stdMat.side = THREE.BackSide;
+              stdMat.needsUpdate = true;
+            }
+            if (toonMat) {
+              toonMat.side = THREE.BackSide;
+              toonMat.needsUpdate = true;
+            }
+            mesh.userData.pbrProps = { ...(mesh.userData.pbrProps || {}), flipNormals: true };
+            if (mesh.userData.outlineMesh) {
+              (mesh.userData.outlineMesh as THREE.Mesh).visible = false;
+            }
+            logs.push(`bpy.ops.mesh.flip_normals(): Normales invertidas (Backface Culling / Outline activo) en '${mesh.name}'.`);
+          }
+        },
+        normals_make_consistent: (opts?: { inside?: boolean }) => {
+          if (opts?.inside) {
+            (bpy.ops.mesh as any).flip_normals();
+          }
         },
         extrude_region_move: () => {},
         mirror_x: () => {
@@ -4831,27 +7121,243 @@ export async function executeBlenderPythonScript(
           logs.push(`bpy.ops.material.set_color(color='${hex}')`);
         },
         set_texture: (...rawArgs: unknown[]) => {
-          const options = extractPyArgs(rawArgs, ['name'], { name: 'dragon_scales' });
-          const texName = (options.name ?? 'dragon_scales') as TexturePatternType;
-          const tex = generateProceduralTexture(texName);
-          collectMeshes();
-          meshes.forEach((m) => {
-            const mat = Array.isArray(m.material) ? m.material[0] : m.material;
-            if (mat && 'map' in mat) {
-              (mat as unknown as THREE.MeshStandardMaterial).map = tex;
-              (mat as unknown as THREE.MeshStandardMaterial).needsUpdate = true;
-            }
-          });
-          callbacks?.onTextureChange?.(texName);
-          logs.push(`bpy.ops.material.set_texture(name='${texName}')`);
+          const options = extractPyArgs(
+            rawArgs,
+            ['name', 'object', 'repeat', 'bump', 'natural_color'],
+            { name: 'stone_ashlar', repeat: 2, bump: 1.0, natural_color: true }
+          );
+          const resolvedTex = resolveTexturePatternId(String(options.name ?? 'stone_ashlar'));
+          const repeatVal = Math.max(1, Math.min(16, Number(options.repeat ?? options.scale ?? 2) || 2));
+          const bumpMult = Math.max(0, Math.min(3.0, Number(options.bump ?? 1.0)));
+          const natCol = options.natural_color !== undefined ? Boolean(options.natural_color) : true;
+          const targetObj = options.object ?? options.objeto;
+          const specificMesh: THREE.Mesh | undefined = targetObj?._threeMesh;
+
+          if (specificMesh && specificMesh.isMesh) {
+            const preset = getTexturePresetInfo(resolvedTex);
+            const origMat = specificMesh.userData.originalMaterial as THREE.MeshPhysicalMaterial | undefined;
+            const baseCol = origMat ? origMat.color.clone() : new THREE.Color('#ffffff');
+            applyMaterialToThreeMesh(
+              specificMesh,
+              baseCol,
+              preset.pbr.metalness,
+              preset.pbr.roughness,
+              null,
+              0,
+              {
+                ...(specificMesh.userData.pbrProps || {}),
+                texturePattern: resolvedTex,
+                textureRepeat: repeatVal,
+                textureNaturalColor: natCol,
+                bumpScale: preset.pbr.bumpScale * bumpMult,
+                clearcoat: preset.pbr.clearcoat,
+                ior: preset.pbr.ior,
+                transmission: preset.pbr.transmission,
+              }
+            );
+            logs.push(
+              `bpy.ops.material.set_texture(name='${resolvedTex}', object='${specificMesh.name}', repeat=${repeatVal}, bump=${bumpMult})`
+            );
+          } else {
+            const preset = getTexturePresetInfo(resolvedTex);
+            collectMeshes();
+            meshes.forEach((m) => {
+              const origMat = m.userData.originalMaterial as THREE.MeshPhysicalMaterial | undefined;
+              const baseCol = origMat ? origMat.color.clone() : new THREE.Color('#ffffff');
+              applyMaterialToThreeMesh(
+                m,
+                baseCol,
+                preset.pbr.metalness,
+                preset.pbr.roughness,
+                null,
+                0,
+                {
+                  ...(m.userData.pbrProps || {}),
+                  texturePattern: resolvedTex,
+                  textureRepeat: repeatVal,
+                  textureNaturalColor: natCol,
+                  bumpScale: preset.pbr.bumpScale * bumpMult,
+                  clearcoat: preset.pbr.clearcoat,
+                  ior: preset.pbr.ior,
+                  transmission: preset.pbr.transmission,
+                }
+              );
+            });
+            callbacks?.onTextureChange?.(resolvedTex);
+            callbacks?.onTextureSettingsChange?.({
+              activeTexture: resolvedTex,
+              repeatScale: repeatVal,
+              bumpIntensity: bumpMult,
+              useNaturalColor: natCol,
+            });
+            logs.push(
+              `bpy.ops.material.set_texture(name='${resolvedTex}', repeat=${repeatVal}, bump=${bumpMult}, natural_color=${natCol})`
+            );
+          }
         },
         set_cel_shading: (...rawArgs: unknown[]) => {
-          const options = extractPyArgs(rawArgs, ['tones'], { tones: 3 });
+          const options = extractPyArgs(rawArgs, ['tones', 'outline_thickness', 'outline_opacity'], {
+            tones: 3,
+          });
+          callbacks?.onRenderEngineChange?.('cel');
+          if (options.outline_thickness !== undefined || options.outline_opacity !== undefined) {
+            callbacks?.onRenderSettingsChange?.({
+              ...(options.outline_thickness !== undefined
+                ? { outlineThickness: Number(options.outline_thickness) }
+                : {}),
+              ...(options.outline_opacity !== undefined
+                ? { outlineOpacity: Number(options.outline_opacity) }
+                : {}),
+            });
+          }
           logs.push(`bpy.ops.material.set_cel_shading(tones=${options.tones}): Cel-Shading activo.`);
         },
       },
+      view3d: {
+        camera_preset: (...rawArgs: unknown[]) => {
+          const opts = extractPyArgs(rawArgs, ['view', 'preset', 'zoom'], { view: 'hero' });
+          const rawV = String(opts.view ?? opts.preset ?? 'hero').toLowerCase();
+          const mapPreset: Record<string, 'hero' | 'front' | 'closeup' | 'macro' | 'side' | 'top'> = {
+            hero: 'hero',
+            iso: 'hero',
+            isometric: 'hero',
+            front: 'front',
+            frontal: 'front',
+            closeup: 'closeup',
+            rostro: 'closeup',
+            macro: 'macro',
+            detalle: 'macro',
+            side: 'side',
+            perfil: 'side',
+            right: 'side',
+            top: 'top',
+            cenital: 'top',
+          };
+          const chosen = mapPreset[rawV] || 'hero';
+          callbacks?.onCameraPresetChange?.(chosen);
+          if (opts.zoom !== undefined) {
+            callbacks?.onZoomChange?.(Math.max(25, Math.min(1600, Number(opts.zoom) || 100)));
+          }
+          logs.push(`bpy.ops.view3d.camera_preset(view='${chosen}')`);
+        },
+        set_zoom: (...rawArgs: unknown[]) => {
+          const opts = extractPyArgs(rawArgs, ['percent', 'zoom'], { percent: 150 });
+          const pct = Math.max(25, Math.min(1600, Number(opts.percent ?? opts.zoom) || 100));
+          callbacks?.onZoomChange?.(pct);
+          logs.push(`bpy.ops.view3d.set_zoom(percent=${pct}%)`);
+        },
+        frame_all: (...rawArgs: unknown[]) => {
+          const opts = extractPyArgs(rawArgs, ['margin'], { margin: 1.2 });
+          callbacks?.onFrameModel?.(Number(opts.margin) || 1.2);
+          logs.push(`bpy.ops.view3d.frame_all(margin=${opts.margin ?? 1.2})`);
+        },
+      },
       wm: createSafeNoopProxy(),
-      render: createSafeNoopProxy(),
+      render: {
+        set_engine: (...rawArgs: unknown[]) => {
+          const opts = extractPyArgs(
+            rawArgs,
+            [
+              'engine',
+              'samples',
+              'clearcoat',
+              'roughness_factor',
+              'ior',
+              'gi_bounce',
+              'progressive',
+              'bloom',
+              'env_intensity',
+            ],
+            { engine: 'CYCLES' }
+          );
+          const engStr = String(opts.engine || 'CYCLES').toUpperCase();
+          if (engStr.includes('CYCLES')) callbacks?.onRenderEngineChange?.('cycles');
+          else if (engStr.includes('EEVEE')) callbacks?.onRenderEngineChange?.('eevee');
+          else if (engStr.includes('MATCAP') || engStr.includes('WORKBENCH')) callbacks?.onRenderEngineChange?.('matcap');
+          else if (engStr.includes('NORMAL')) callbacks?.onRenderEngineChange?.('normals');
+          else if (engStr.includes('ORIGINAL')) callbacks?.onRenderEngineChange?.('original');
+          else callbacks?.onRenderEngineChange?.('cel');
+
+          const partial: Record<string, any> = {};
+          if (opts.samples !== undefined) partial.cyclesSamples = Math.max(16, Math.min(256, Number(opts.samples)));
+          if (opts.clearcoat !== undefined) partial.cyclesClearcoat = Math.max(0, Math.min(1, Number(opts.clearcoat)));
+          if (opts.roughness_factor !== undefined) partial.cyclesRoughnessFactor = Math.max(0.15, Math.min(1.4, Number(opts.roughness_factor)));
+          if (opts.ior !== undefined) partial.cyclesIor = Math.max(1.0, Math.min(2.4, Number(opts.ior)));
+          if (opts.gi_bounce !== undefined) partial.cyclesGiBounceBoost = Math.max(0.6, Math.min(2.4, Number(opts.gi_bounce)));
+          if (opts.progressive !== undefined) partial.cyclesProgressiveAccum = Boolean(opts.progressive);
+          if (opts.bloom !== undefined) partial.eeveeBloomIntensity = Math.max(0, Math.min(1.8, Number(opts.bloom)));
+          if (opts.env_intensity !== undefined) partial.eeveeEnvIntensity = Math.max(0.2, Math.min(3.0, Number(opts.env_intensity)));
+          if (Object.keys(partial).length > 0) {
+            callbacks?.onRenderSettingsChange?.(partial);
+          }
+          logs.push(`bpy.ops.render.set_engine(engine='${opts.engine}')`);
+        },
+        set_shading: (...rawArgs: unknown[]) => {
+          const opts = extractPyArgs(rawArgs, ['mode', 'matcap'], { mode: 'cel' });
+          const mStr = String(opts.mode || 'cel').toLowerCase();
+          if (mStr.includes('cycle')) callbacks?.onRenderEngineChange?.('cycles');
+          else if (mStr.includes('eevee')) callbacks?.onRenderEngineChange?.('eevee');
+          else if (mStr.includes('matcap')) callbacks?.onRenderEngineChange?.('matcap');
+          else if (mStr.includes('normal')) callbacks?.onRenderEngineChange?.('normals');
+          else if (mStr.includes('original') || mStr.includes('pbr')) callbacks?.onRenderEngineChange?.('original');
+          else callbacks?.onRenderEngineChange?.('cel');
+
+          if (opts.matcap) {
+            callbacks?.onRenderSettingsChange?.({ matcapPreset: String(opts.matcap) as MatcapPresetId });
+          }
+          logs.push(`bpy.ops.render.set_shading(mode='${opts.mode}')`);
+        },
+        set_outline: (...rawArgs: unknown[]) => {
+          const opts = extractPyArgs(rawArgs, ['thickness', 'opacity'], { thickness: 1.25, opacity: 0.9 });
+          callbacks?.onRenderSettingsChange?.({
+            outlineThickness: Math.max(0, Math.min(3.0, Number(opts.thickness ?? 1.25))),
+            outlineOpacity: Math.max(0, Math.min(1.0, Number(opts.opacity ?? 0.9))),
+          });
+          logs.push(`bpy.ops.render.set_outline(thickness=${opts.thickness}, opacity=${opts.opacity})`);
+        },
+        set_normal_smoothing: (...rawArgs: unknown[]) => {
+          const opts = extractPyArgs(rawArgs, ['factor'], { factor: 0.92 });
+          const fac = Math.max(0, Math.min(1, Number(opts.factor ?? 0.92)));
+          callbacks?.onRenderSettingsChange?.({ normalSmoothing: fac });
+          applyNormalSmoothingToModel(modelWrapper, fac);
+          logs.push(`bpy.ops.render.set_normal_smoothing(factor=${fac})`);
+        },
+        set_ssao: (...rawArgs: unknown[]) => {
+          const opts = extractPyArgs(rawArgs, ['intensity'], { intensity: 1.15 });
+          const val = Math.max(0, Math.min(2.5, Number(opts.intensity ?? 1.15)));
+          callbacks?.onRenderSettingsChange?.({ ssaoIntensity: val });
+          logs.push(`bpy.ops.render.set_ssao(intensity=${val})`);
+        },
+        set_lighting: (...rawArgs: unknown[]) => {
+          const opts = extractPyArgs(rawArgs, ['intensity', 'angle', 'follow_camera'], {});
+          const partial: Record<string, any> = {};
+          if (opts.intensity !== undefined) partial.lightIntensity = Math.max(0.5, Math.min(4.0, Number(opts.intensity)));
+          if (opts.angle !== undefined) partial.lightAngle = ((Number(opts.angle) % 360) + 360) % 360;
+          if (opts.follow_camera !== undefined) partial.followCameraLight = Boolean(opts.follow_camera);
+          callbacks?.onRenderSettingsChange?.(partial);
+          logs.push(`bpy.ops.render.set_lighting(${JSON.stringify(partial)})`);
+        },
+        set_viewport: (...rawArgs: unknown[]) => {
+          const opts = extractPyArgs(
+            rawArgs,
+            ['bg_color', 'show_pedestal', 'wireframe', 'auto_rotate', 'auto_rotate_speed', 'aa_mode'],
+            {}
+          );
+          const partial: Record<string, any> = {};
+          if (opts.bg_color !== undefined) {
+            const c = parsePythonColor(opts.bg_color, '#1e2536');
+            partial.bgColor = `#${c.getHexString()}`;
+          }
+          if (opts.show_pedestal !== undefined) partial.showPedestalGrid = Boolean(opts.show_pedestal);
+          if (opts.wireframe !== undefined) partial.wireframe = Boolean(opts.wireframe);
+          if (opts.auto_rotate !== undefined) partial.autoRotate = Boolean(opts.auto_rotate);
+          if (opts.auto_rotate_speed !== undefined) partial.autoRotateSpeed = Number(opts.auto_rotate_speed) || 1.2;
+          if (opts.aa_mode !== undefined) partial.aaMode = String(opts.aa_mode).toUpperCase() === 'FXAA' ? 'FXAA' : 'SMAA';
+          callbacks?.onRenderSettingsChange?.(partial);
+          logs.push(`bpy.ops.render.set_viewport(${JSON.stringify(partial)})`);
+        },
+      },
+      anim: animModuleProxy,
     },
   };
 
@@ -5000,7 +7506,13 @@ export async function executeBlenderPythonScript(
     const vec = createMathutilsVector(init, y, z);
     vec.order = order;
     vec.to_matrix = function () {
-      return mathutils.Matrix.Rotation(vec[2], 4, 'Z');
+      const rx = Number(vec[0]) || 0;
+      const ry = Number(vec[1]) || 0;
+      const rz = Number(vec[2]) || 0;
+      const mx = createMathutilsMatrix.Rotation(rx, 4, 'X');
+      const my = createMathutilsMatrix.Rotation(ry, 4, 'Y');
+      const mz = createMathutilsMatrix.Rotation(rz, 4, 'Z');
+      return bpy._matmul(mz, bpy._matmul(my, mx));
     };
     return vec;
   };
@@ -5033,6 +7545,20 @@ export async function executeBlenderPythonScript(
   createMathutilsMatrix.Rotation = (ang: number, _size: number = 4, axis: any = 'Z') => {
     const c = Math.cos(ang || 0);
     const s = Math.sin(ang || 0);
+    if (axis && typeof axis === 'object') {
+      const ax = Number(axis[0] ?? axis.x ?? 0);
+      const ay = Number(axis[1] ?? axis.y ?? 0);
+      const az = Number(axis[2] ?? axis.z ?? 1);
+      const len = Math.hypot(ax, ay, az) || 1;
+      const ux = ax / len, uy = ay / len, uz = az / len;
+      const t = 1 - c;
+      return [
+        [t * ux * ux + c, t * ux * uy - s * uz, t * ux * uz + s * uy, 0],
+        [t * ux * uy + s * uz, t * uy * uy + c, t * uy * uz - s * ux, 0],
+        [t * ux * uz - s * uy, t * uy * uz + s * ux, t * uz * uz + c, 0],
+        [0, 0, 0, 1],
+      ];
+    }
     const ax = typeof axis === 'string' ? axis.toUpperCase() : 'Z';
     if (ax === 'X') {
       return [
@@ -5195,22 +7721,80 @@ export async function executeBlenderPythonScript(
             }
           }
         },
-        to_mesh: (meshData: any) => {
-          if (!meshData) return;
-          if (bmVerts.length > 0 && bmFaces.length > 0 && meshData.from_pydata) {
-            // Re-index vertices sequentially in case any were removed
-            bmVerts.forEach((v, idx) => {
-              v.index = idx;
-            });
-            const rawV: [number, number, number][] = bmVerts.map((v) => [v.co.x, v.co.y, v.co.z]);
-            const rawF: number[][] = bmFaces.map((f) =>
-              Array.isArray(f)
-                ? f.map((item: any) => Number(typeof item === 'object' ? item?.index : item))
-                : Array.isArray(f?.verts)
-                  ? f.verts.map((v: any) => Number(v?.index ?? 0))
-                  : []
+        to_mesh: (targetMeshObj: any) => {
+          if (!targetMeshObj) return;
+          if (bmVerts.length > 0 && bmFaces.length > 0) {
+            // Re-indexar los vértices secuencialmente y extraer sus posiciones actualizadas (tras deformaciones math.sin/cos)
+            const positions: number[] = [];
+            const uvs: number[] = [];
+            const indices: number[] = [];
+
+            for (let i = 0; i < bmVerts.length; i++) {
+              bmVerts[i].index = i;
+              const vx = Number(bmVerts[i].co?.x ?? bmVerts[i].co?.[0] ?? 0);
+              const vy = Number(bmVerts[i].co?.y ?? bmVerts[i].co?.[1] ?? 0);
+              const vz = Number(bmVerts[i].co?.z ?? bmVerts[i].co?.[2] ?? 0);
+              if (isZUp) {
+                positions.push(vx, vz, -vy);
+              } else {
+                positions.push(vx, vy, vz);
+              }
+              uvs.push(vx, vy);
+            }
+
+            // Triangular caras para WebGL (triángulos, cuadriláteros -> 2 triángulos, y N-gonos)
+            for (const face of bmFaces) {
+              const fVerts = Array.isArray(face) ? face : Array.isArray(face?.verts) ? face.verts : [];
+              const vIdxList: number[] = [];
+              for (const fv of fVerts) {
+                const idx = Number(typeof fv === 'object' ? fv?.index : fv);
+                if (!Number.isNaN(idx) && idx >= 0 && idx < bmVerts.length) {
+                  vIdxList.push(idx);
+                }
+              }
+              if (vIdxList.length === 3) {
+                indices.push(vIdxList[0], vIdxList[1], vIdxList[2]);
+              } else if (vIdxList.length === 4) {
+                // Cuadrilátero -> 2 triángulos
+                indices.push(vIdxList[0], vIdxList[1], vIdxList[2]);
+                indices.push(vIdxList[0], vIdxList[2], vIdxList[3]);
+              } else if (vIdxList.length > 4) {
+                for (let k = 1; k < vIdxList.length - 1; k++) {
+                  indices.push(vIdxList[0], vIdxList[k], vIdxList[k + 1]);
+                }
+              }
+            }
+
+            const geometry = new THREE.BufferGeometry();
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+            geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+            if (indices.length > 0) {
+              geometry.setIndex(indices);
+            }
+            geometry.computeVertexNormals(); // Crucial para el sombreado suave (f.smooth = True)
+
+            targetMeshObj._threeGeometry = geometry;
+            targetMeshObj._needsRebuild = true;
+
+            if (typeof targetMeshObj._syncGeometryToBoundMesh === 'function') {
+              targetMeshObj._syncGeometryToBoundMesh(geometry);
+            } else {
+              targetMeshObj._geometry = geometry;
+              const boundMesh: THREE.Mesh | null =
+                targetMeshObj._threeMesh || (targetMeshObj._ownerProxy?._threeMesh as THREE.Mesh | null) || null;
+              if (boundMesh) {
+                boundMesh.geometry = geometry;
+                prepareGeometryNormals(boundMesh);
+                targetMeshObj._geometry = boundMesh.geometry;
+                if (boundMesh.userData.outlineMesh) {
+                  (boundMesh.userData.outlineMesh as THREE.Mesh).geometry = boundMesh.geometry;
+                }
+              }
+            }
+
+            logs.push(
+              `bm.to_mesh: ${bmVerts.length} vértices y ${bmFaces.length} caras (${Math.floor(indices.length / 3)} tris) volcados a BufferGeometry.`
             );
-            meshData.from_pydata(rawV, [], rawF);
           } else if (internalGeo && bmVerts.length > 0) {
             const pos = internalGeo.attributes.position as THREE.BufferAttribute;
             if (pos && pos.count === bmVerts.length) {
@@ -5222,14 +7806,26 @@ export async function executeBlenderPythonScript(
               pos.needsUpdate = true;
               internalGeo.computeVertexNormals();
             }
-            meshData._geometry.copy(internalGeo);
+            if (typeof targetMeshObj._syncGeometryToBoundMesh === 'function') {
+              targetMeshObj._syncGeometryToBoundMesh(internalGeo.clone());
+            } else {
+              targetMeshObj._geometry.copy(internalGeo);
+              if (targetMeshObj._threeMesh) {
+                prepareGeometryNormals(targetMeshObj._threeMesh);
+              }
+            }
           } else if (internalGeo) {
-            meshData._geometry.copy(internalGeo);
-          }
-          if (meshData._threeMesh) {
-            prepareGeometryNormals(meshData._threeMesh);
+            if (typeof targetMeshObj._syncGeometryToBoundMesh === 'function') {
+              targetMeshObj._syncGeometryToBoundMesh(internalGeo.clone());
+            } else {
+              targetMeshObj._geometry.copy(internalGeo);
+              if (targetMeshObj._threeMesh) {
+                prepareGeometryNormals(targetMeshObj._threeMesh);
+              }
+            }
           }
         },
+        normal_update: () => {},
         transform: (mat: any) => {
           if (!mat) return;
           for (const v of bmVerts) {
@@ -5241,12 +7837,14 @@ export async function executeBlenderPythonScript(
             }
           }
         },
-        free: () => {},
+        free: () => {
+          bmVerts.length = 0;
+          bmFaces.length = 0;
+        },
         clear: () => {
           bmVerts.length = 0;
           bmFaces.length = 0;
         },
-        normal_update: () => {},
         _appendInternalGeo: (g: THREE.BufferGeometry, matrix?: any) => {
           const nonIndexed = g.index ? g.toNonIndexed() : g;
           const pos = nonIndexed.attributes.position as THREE.BufferAttribute;
@@ -5368,16 +7966,71 @@ export async function executeBlenderPythonScript(
         return { geom: [...added.verts, ...added.faces], verts: added.verts, faces: added.faces, edges: [] };
       },
       create_grid: (...rawArgs: unknown[]) => {
-        const opts = extractPyArgs(rawArgs, ['bm', 'x_segments', 'y_segments', 'size', 'matrix'], {
-          x_segments: 4,
-          y_segments: 4,
-          size: 1.0,
-        });
-        const s = Number(opts.size ?? 1.0);
-        const added = opts.bm?._appendInternalGeo
-          ? opts.bm._appendInternalGeo(new THREE.BoxGeometry(s, s, 0.02, 4, 4, 1), opts.matrix)
-          : { verts: [], faces: [] };
-        return { geom: [...added.verts, ...added.faces], verts: added.verts, faces: added.faces, edges: [] };
+        const opts = extractPyArgs(
+          rawArgs,
+          ['bm', 'x_segments', 'y_segments', 'size', 'matrix', 'calc_uvs'],
+          {
+            x_segments: 10,
+            y_segments: 10,
+            size: 1.0,
+            matrix: null,
+            calc_uvs: false,
+          }
+        );
+        const bmTarget = opts.bm;
+        if (!bmTarget || !bmTarget.verts || !bmTarget.faces) {
+          return { geom: [], verts: [], faces: [], edges: [] };
+        }
+
+        const xSegments = Math.max(1, Math.min(350, Math.round(Number(opts.x_segments) || 10)));
+        const ySegments = Math.max(1, Math.min(350, Math.round(Number(opts.y_segments) || 10)));
+        const size = Math.max(0.001, Number(opts.size ?? 1.0));
+        const half = size / 2.0;
+        const dx = size / xSegments;
+        const dy = size / ySegments;
+
+        const gridVerts: any[] = [];
+        // Crear matriz bidimensional de vértices (x_segments + 1) * (y_segments + 1)
+        for (let iy = 0; iy <= ySegments; iy++) {
+          const y = -half + iy * dy;
+          for (let ix = 0; ix <= xSegments; ix++) {
+            const x = -half + ix * dx;
+            let vx = x;
+            let vy = y;
+            let vz = 0.0;
+            if (opts.matrix) {
+              const transformed = bpy._matmul(opts.matrix, [vx, vy, vz]);
+              if (transformed) {
+                vx = Number(transformed[0] ?? transformed.x ?? vx);
+                vy = Number(transformed[1] ?? transformed.y ?? vy);
+                vz = Number(transformed[2] ?? transformed.z ?? vz);
+              }
+            }
+            const v = bmTarget.verts.new([vx, vy, vz]);
+            gridVerts.push(v);
+          }
+        }
+
+        // Conectar caras cuadrangulares (quads [v0, v1, v2, v3])
+        const stride = xSegments + 1;
+        const gridFaces: any[] = [];
+        for (let iy = 0; iy < ySegments; iy++) {
+          for (let ix = 0; ix < xSegments; ix++) {
+            const v0 = gridVerts[iy * stride + ix];
+            const v1 = gridVerts[iy * stride + (ix + 1)];
+            const v2 = gridVerts[(iy + 1) * stride + (ix + 1)];
+            const v3 = gridVerts[(iy + 1) * stride + ix];
+            const f = bmTarget.faces.new([v0, v1, v2, v3]);
+            gridFaces.push(f);
+          }
+        }
+
+        return {
+          geom: [...gridVerts, ...gridFaces],
+          verts: gridVerts,
+          faces: gridFaces,
+          edges: [],
+        };
       },
       subdivide_edges: (...rawArgs: unknown[]) => {
         const opts = extractPyArgs(rawArgs, ['bm', 'edges', 'cuts'], { cuts: 1 });
@@ -5591,12 +8244,21 @@ export async function executeBlenderPythonScript(
   // Envolver sub-espacios de bpy.ops y bmesh.ops en Proxies tolerantes para que operadores no esenciales nunca lancen TypeError
   const wrapOpsNamespace = <T extends Record<string, any>>(nsObj: T): T =>
     new Proxy(nsObj, {
+      has(target, prop) {
+        return prop in target;
+      },
       get(target, prop) {
-        if (prop in target) return target[prop as keyof T];
+        if (prop === 'then' || prop === 'catch' || prop === 'finally') return undefined;
+        const val = (target as any)[prop];
+        if (val !== undefined || prop in target) return val;
         if (typeof prop === 'string') {
           return () => ({ FINISHED: true, geom: [], verts: [], edges: [], faces: [] });
         }
         return Reflect.get(target, prop);
+      },
+      set(target, prop, value) {
+        (target as any)[prop] = value;
+        return true;
       },
     });
 
@@ -5605,10 +8267,21 @@ export async function executeBlenderPythonScript(
   bpy.ops.curve = wrapOpsNamespace(bpy.ops.curve);
   bpy.ops.transform = wrapOpsNamespace(bpy.ops.transform);
   bpy.ops.material = wrapOpsNamespace(bpy.ops.material);
+  bpy.ops.view3d = wrapOpsNamespace(bpy.ops.view3d);
+  bpy.ops.render = wrapOpsNamespace(bpy.ops.render);
   (bpy as any).ops = new Proxy(bpy.ops, {
+    has(target, prop) {
+      return prop in target;
+    },
     get(target, prop) {
-      if (prop in target) return (target as any)[prop];
+      if (prop === 'then' || prop === 'catch' || prop === 'finally') return undefined;
+      const val = (target as any)[prop];
+      if (val !== undefined || prop in target) return val;
       return createSafeNoopProxy();
+    },
+    set(target, prop, value) {
+      (target as any)[prop] = value;
+      return true;
     },
   });
   bmesh.ops = wrapOpsNamespace(bmesh.ops);
@@ -5621,16 +8294,29 @@ export async function executeBlenderPythonScript(
     if (me?.update) me.update();
   };
 
+  const rawSourceLines = cleanedRawScript.split('\n');
+  const transpiledStatementsForDiag: { pyLine: number; jsText: string }[] = [];
+
   try {
-    // 1. Limpiar docstrings, comentarios y unir sentencias multilínea entre paréntesis
+    // 0. Pre-diagnóstico de paréntesis, corchetes, llaves y comillas con número de línea exacto
+    const preDiagError = diagnosePythonStructureBeforeTranspile(rawSourceLines);
+    if (preDiagError) {
+      const preErr = new SyntaxError(preDiagError.reason);
+      (preErr as any).__pyLine = preDiagError.line;
+      (preErr as any).__pyReason = preDiagError.reason;
+      throw preErr;
+    }
+
+    // 1. Limpiar docstrings, comentarios y unir sentencias multilínea entre paréntesis conservando /*@L:N@*/
     let jsCode = stripPythonCommentsAndDocstrings(cleanedRawScript);
     jsCode = joinMultilineBracketStatements(jsCode);
 
-    // 2. Limpiar imports estándar de Python/Blender y formatear f-strings/r-strings con escáner consciente de strings
+    // 2. Limpiar imports estándar de Python/Blender y formatear f-strings/r-strings y lambdas
     jsCode = jsCode
-      .replace(/^\s*import\s+[a-zA-Z0-9_.,\s]+$/gm, '')
-      .replace(/^\s*from\s+[a-zA-Z0-9_.]+\s+import\s+.*$/gm, '');
+      .replace(/^(?:\/\*@L:\d+@\*\/)?\s*import\s+[a-zA-Z0-9_.,\s*]+$/gm, '')
+      .replace(/^(?:\/\*@L:\d+@\*\/)?\s*from\s+[a-zA-Z0-9_.]+\s+import\s+.*$/gm, '');
     jsCode = convertPythonFStringsAndRawStrings(jsCode);
+    jsCode = convertPythonLambdas(jsCode);
     jsCode = jsCode.replace(/\brange\s*\(/g, 'bpy._range(');
 
     // 3. Convertir comprensiones de listas, generadores y diccionarios Python
@@ -5713,6 +8399,7 @@ export async function executeBlenderPythonScript(
       'range',
       'set',
       '__name__',
+      '__pyLine',
     ]);
 
     const registerAssignedVariable = (varName: string) => {
@@ -5745,7 +8432,14 @@ export async function executeBlenderPythonScript(
     };
 
     for (let i = 0; i < lines.length; i++) {
-      const rawLine = lines[i];
+      let rawLine = lines[i];
+      let currentPyLine = i + 1;
+      const markerMatch = rawLine.match(/^\/\*@L:(\d+)@\*\//);
+      if (markerMatch) {
+        currentPyLine = parseInt(markerMatch[1], 10);
+        rawLine = rawLine.slice(markerMatch[0].length);
+      }
+
       let trimmed = rawLine.trim();
 
       if (!trimmed || trimmed.startsWith('//') || trimmed.startsWith('@')) {
@@ -5785,12 +8479,18 @@ export async function executeBlenderPythonScript(
 
       const activeClassBlock = [...blockStack].reverse().find((b) => b.isClass);
       const isInClass = Boolean(activeClassBlock && currentIndent > activeClassBlock.headerIndent);
+      const isDirectClassMember = Boolean(
+        isInClass && blockStack[blockStack.length - 1]?.isClass
+      );
 
       // Cabecera de clase: `class NombreClase(bpy.types.Operator):`
       const classMatch = trimmed.match(/^class\s+([a-zA-Z_]\w*)(?:\(([^)]*)\))?\s*:$/);
       if (classMatch) {
         const className = classMatch[1];
         reservedVars.add(className);
+        if (!isDirectClassMember) {
+          transformedLines.push(`${indentStr}__pyLine = ${currentPyLine};`);
+        }
         transformedLines.push(`${indentStr}class ${className} {`);
         blockStack.push({ headerIndent: currentIndent, isClass: true });
         continue;
@@ -5840,8 +8540,10 @@ export async function executeBlenderPythonScript(
         } else {
           transformedLines.push(`${indentStr}function ${fnName}(...__rawArgs) {`);
         }
+        transformedLines.push(`${indentStr}  __pyLine = ${currentPyLine};`);
         if (destructureVars) {
           transformedLines.push(`${indentStr}  ${destructureVars}`);
+          transpiledStatementsForDiag.push({ pyLine: currentPyLine, jsText: destructureVars });
         }
         const fnDeclLineIndex = transformedLines.length;
         transformedLines.push('');
@@ -5856,7 +8558,7 @@ export async function executeBlenderPythonScript(
 
       // Propiedad estática/de campo dentro de una clase Python (`bl_idname = "mesh.my_op"`)
       if (
-        isInClass &&
+        isDirectClassMember &&
         trimmed.includes('=') &&
         !trimmed.startsWith('if ') &&
         !trimmed.startsWith('for ') &&
@@ -5868,7 +8570,7 @@ export async function executeBlenderPythonScript(
 
       // Bloque `with ...:` (ej. `with bpy.context.temp_override(...):`)
       if (/^with\s+.+:$/.test(trimmed)) {
-        transformedLines.push(`${indentStr}if (true) {`);
+        transformedLines.push(`${indentStr}__pyLine = ${currentPyLine}; if (true) {`);
         blockStack.push({ headerIndent: currentIndent });
         continue;
       }
@@ -5887,7 +8589,9 @@ export async function executeBlenderPythonScript(
           jsTarget = `[${rawTarget.replace(/\(/g, '[').replace(/\)/g, ']')}]`;
         }
 
-        transformedLines.push(`${indentStr}for (let ${jsTarget} of ${iterExpr}) {`);
+        const forHeaderJs = `for (let ${jsTarget} of ${iterExpr}) {`;
+        transformedLines.push(`${indentStr}__pyLine = ${currentPyLine}; ${forHeaderJs}`);
+        transpiledStatementsForDiag.push({ pyLine: currentPyLine, jsText: `${forHeaderJs} }` });
         blockStack.push({ headerIndent: currentIndent });
         continue;
       }
@@ -5895,7 +8599,9 @@ export async function executeBlenderPythonScript(
       // Bucle `while cond:`
       const whileMatch = trimmed.match(/^while\s+(.+):$/);
       if (whileMatch) {
-        transformedLines.push(`${indentStr}while (${rewritePythonSyntaxInLine(whileMatch[1])}) {`);
+        const condJs = rewritePythonSyntaxInLine(whileMatch[1]);
+        transformedLines.push(`${indentStr}__pyLine = ${currentPyLine}; while (${condJs}) {`);
+        transpiledStatementsForDiag.push({ pyLine: currentPyLine, jsText: `while (${condJs}) {}` });
         blockStack.push({ headerIndent: currentIndent });
         continue;
       }
@@ -5903,7 +8609,9 @@ export async function executeBlenderPythonScript(
       // `if cond:`
       const ifMatch = trimmed.match(/^if\s+(.+):$/);
       if (ifMatch) {
-        transformedLines.push(`${indentStr}if (${rewritePythonSyntaxInLine(ifMatch[1])}) {`);
+        const condJs = rewritePythonSyntaxInLine(ifMatch[1]);
+        transformedLines.push(`${indentStr}__pyLine = ${currentPyLine}; if (${condJs}) {`);
+        transpiledStatementsForDiag.push({ pyLine: currentPyLine, jsText: `if (${condJs}) {}` });
         blockStack.push({ headerIndent: currentIndent });
         continue;
       }
@@ -5911,32 +8619,33 @@ export async function executeBlenderPythonScript(
       // `elif cond:`
       const elifMatch = trimmed.match(/^elif\s+(.+):$/);
       if (elifMatch) {
-        transformedLines.push(`${indentStr}} else if (${rewritePythonSyntaxInLine(elifMatch[1])}) {`);
+        const condJs = rewritePythonSyntaxInLine(elifMatch[1]);
+        transformedLines.push(
+          `${indentStr}} else if ((__pyLine = ${currentPyLine}, (${condJs}))) {`
+        );
+        transpiledStatementsForDiag.push({ pyLine: currentPyLine, jsText: `if (${condJs}) {}` });
         blockStack.push({ headerIndent: currentIndent });
         continue;
       }
 
       if (trimmed === 'else:') {
-        transformedLines.push(`${indentStr}} else {`);
+        transformedLines.push(`${indentStr}} else { __pyLine = ${currentPyLine};`);
         blockStack.push({ headerIndent: currentIndent });
         continue;
       }
 
       if (trimmed === 'try:') {
-        transformedLines.push(`${indentStr}try {`);
+        transformedLines.push(`${indentStr}__pyLine = ${currentPyLine}; try {`);
         blockStack.push({ headerIndent: currentIndent });
         continue;
       }
 
       // Manejar cláusulas `except:` o `except Exception as e:` vinculando las variables e, err, error
-      // Acepta `except:`, `except X:`, `except X as e:`, `except (A, B) as err:` y `except(A, B):` (sin espacio).
       const exceptMatch = trimmed.match(/^except\b\s*[^:]*?(?:\s+as\s+([a-zA-Z_]\w*))?\s*:$/);
       if (exceptMatch) {
-        // El parámetro del catch es siempre `__pyErr` para no colisionar con `let e` cuando la
-        // variable del `as` se llama igual (`except Exception as e:` -> "Identifier 'e' has already been declared").
         const boundName = exceptMatch[1];
         const aliases = Array.from(new Set(['e', 'err', 'error', ...(boundName ? [boundName] : [])]));
-        transformedLines.push(`${indentStr}} catch (__pyErr) {`);
+        transformedLines.push(`${indentStr}} catch (__pyErr) { __pyLine = ${currentPyLine};`);
         transformedLines.push(
           `${indentStr}  ${aliases.map((name) => `let ${name} = __pyErr;`).join(' ')}`
         );
@@ -5945,7 +8654,7 @@ export async function executeBlenderPythonScript(
       }
 
       if (trimmed === 'finally:') {
-        transformedLines.push(`${indentStr}} finally {`);
+        transformedLines.push(`${indentStr}} finally { __pyLine = ${currentPyLine};`);
         blockStack.push({ headerIndent: currentIndent });
         continue;
       }
@@ -5962,7 +8671,9 @@ export async function executeBlenderPythonScript(
         const retExpr = returnMatch[1].trim();
         const topParts = splitTopLevelCommas(retExpr);
         if (topParts.length > 1) {
-          transformedLines.push(`${indentStr}return [${retExpr}];`);
+          const stmtJs = `return [${retExpr}];`;
+          transformedLines.push(`${indentStr}__pyLine = ${currentPyLine}; ${stmtJs}`);
+          transpiledStatementsForDiag.push({ pyLine: currentPyLine, jsText: `[${retExpr}];` });
           continue;
         }
       }
@@ -5978,7 +8689,9 @@ export async function executeBlenderPythonScript(
           rhsExpr = `[${rhsExpr}]`;
         }
         lhsVars.forEach((v) => registerAssignedVariable(v));
-        transformedLines.push(`${indentStr}[${lhsVars.join(', ')}] = ${rhsExpr};`);
+        const stmtJs = `[${lhsVars.join(', ')}] = ${rhsExpr};`;
+        transformedLines.push(`${indentStr}__pyLine = ${currentPyLine}; ${stmtJs}`);
+        transpiledStatementsForDiag.push({ pyLine: currentPyLine, jsText: stmtJs });
         continue;
       }
 
@@ -5987,13 +8700,14 @@ export async function executeBlenderPythonScript(
       if (assignMatch) {
         const vName = assignMatch[1];
         registerAssignedVariable(vName);
-        // Si es `x = 1, 2, 3` (tupla implícita sin paréntesis a una sola variable), envolver el RHS en `[...]`
         const eqPos = trimmed.indexOf('=');
         const opChar = trimmed[eqPos - 1];
         if (opChar !== '+' && opChar !== '-' && opChar !== '*' && opChar !== '/') {
           const rhsSingle = trimmed.slice(eqPos + 1).trim();
           if (splitTopLevelCommas(rhsSingle).length > 1) {
-            transformedLines.push(`${indentStr}${vName} = [${rhsSingle}];`);
+            const stmtJs = `${vName} = [${rhsSingle}];`;
+            transformedLines.push(`${indentStr}__pyLine = ${currentPyLine}; ${stmtJs}`);
+            transpiledStatementsForDiag.push({ pyLine: currentPyLine, jsText: stmtJs });
             continue;
           }
         }
@@ -6002,9 +8716,9 @@ export async function executeBlenderPythonScript(
       // Expresión ternaria inline de Python: `x = a if cond else b`
       const ternaryAssign = trimmed.match(/^([a-zA-Z0-9_.[\]]+\s*=\s*)([^=]+?)\s+if\s+(.+?)\s+else\s+(.+)$/);
       if (ternaryAssign) {
-        transformedLines.push(
-          `${indentStr}${ternaryAssign[1]}(${ternaryAssign[3]}) ? (${ternaryAssign[2]}) : (${ternaryAssign[4]});`
-        );
+        const stmtJs = `${ternaryAssign[1]}(${ternaryAssign[3]}) ? (${ternaryAssign[2]}) : (${ternaryAssign[4]});`;
+        transformedLines.push(`${indentStr}__pyLine = ${currentPyLine}; ${stmtJs}`);
+        transpiledStatementsForDiag.push({ pyLine: currentPyLine, jsText: stmtJs });
         continue;
       }
 
@@ -6012,11 +8726,12 @@ export async function executeBlenderPythonScript(
       trimmed = rewriteInlineTernaries(trimmed);
 
       // Añadir punto y coma para eliminar colisiones ASI de JavaScript
-      if (!trimmed.endsWith(';') && !trimmed.endsWith('{') && !trimmed.endsWith('}') && !trimmed.startsWith('/*')) {
-        transformedLines.push(`${indentStr}${trimmed};`);
-      } else {
-        transformedLines.push(`${indentStr}${trimmed}`);
-      }
+      const finalStmt =
+        !trimmed.endsWith(';') && !trimmed.endsWith('{') && !trimmed.endsWith('}') && !trimmed.startsWith('/*')
+          ? `${trimmed};`
+          : trimmed;
+      transformedLines.push(`${indentStr}__pyLine = ${currentPyLine}; ${finalStmt}`);
+      transpiledStatementsForDiag.push({ pyLine: currentPyLine, jsText: finalStmt });
     }
 
     while (blockStack.length > 0) {
@@ -6026,71 +8741,88 @@ export async function executeBlenderPythonScript(
 
     const varDeclHeader =
       topLevelVars.size > 0 ? `let ${Array.from(topLevelVars).join(', ')};\n` : '';
-    const processedCode = varDeclHeader + transformedLines.join('\n');
+    const processedCode =
+      `let __pyLine = 1;\ntry {\n` +
+      varDeclHeader +
+      transformedLines.join('\n') +
+      `\n} catch (__runtimeErr) {\n  if (__runtimeErr && typeof __runtimeErr === 'object') {\n    __runtimeErr.__pyLine = __pyLine;\n  }\n  throw __runtimeErr;\n}`;
 
     const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
-    const runner = new AsyncFunction(
-      'bpy',
-      'bmesh',
-      'mathutils',
-      'Vector',
-      'Euler',
-      'Matrix',
-      'Color',
-      'Quaternion',
-      'random',
-      'math',
-      'np',
-      'numpy',
-      'pi',
-      'tau',
-      'sin',
-      'cos',
-      'tan',
-      'asin',
-      'acos',
-      'atan',
-      'atan2',
-      'sqrt',
-      'pow',
-      'exp',
-      'log',
-      'radians',
-      'degrees',
-      'floor',
-      'ceil',
-      'hypot',
-      'uniform',
-      'randint',
-      'choice',
-      'seed',
-      'print',
-      'len',
-      'abs',
-      'min',
-      'max',
-      'round',
-      'int',
-      'float',
-      'str',
-      'bool',
-      'list',
-      'tuple',
-      'dict',
-      'enumerate',
-      'zip',
-      'sum',
-      'reversed',
-      'sorted',
-      'isinstance',
-      'hasattr',
-      'getattr',
-      'setattr',
-      'range',
-      'set',
-      '__name__',
-      processedCode
-    );
+    let runner: any;
+    try {
+      runner = new AsyncFunction(
+        'bpy',
+        'bmesh',
+        'mathutils',
+        'Vector',
+        'Euler',
+        'Matrix',
+        'Color',
+        'Quaternion',
+        'random',
+        'math',
+        'np',
+        'numpy',
+        'pi',
+        'tau',
+        'sin',
+        'cos',
+        'tan',
+        'asin',
+        'acos',
+        'atan',
+        'atan2',
+        'sqrt',
+        'pow',
+        'exp',
+        'log',
+        'radians',
+        'degrees',
+        'floor',
+        'ceil',
+        'hypot',
+        'uniform',
+        'randint',
+        'choice',
+        'seed',
+        'print',
+        'len',
+        'abs',
+        'min',
+        'max',
+        'round',
+        'int',
+        'float',
+        'str',
+        'bool',
+        'list',
+        'tuple',
+        'dict',
+        'enumerate',
+        'zip',
+        'sum',
+        'reversed',
+        'sorted',
+        'isinstance',
+        'hasattr',
+        'getattr',
+        'setattr',
+        'range',
+        'set',
+        '__name__',
+        processedCode
+      );
+    } catch (compileErr: unknown) {
+      const culpritLine = findSyntaxErrorPythonLine(
+        rawSourceLines,
+        transpiledStatementsForDiag,
+        compileErr
+      );
+      if (compileErr && typeof compileErr === 'object') {
+        (compileErr as any).__pyLine = culpritLine;
+      }
+      throw compileErr;
+    }
 
     await runner(
       bpy,
@@ -6209,10 +8941,11 @@ export async function executeBlenderPythonScript(
 
     collectMeshes();
 
-    // 8. Si el script se ejecutó en modo Blender 5.2 (Z-Up) y creó objetos nuevos,
-    // auto-ajustar escala si excede el visor y apoyar la base sobre el pedestal Y=0.02
+    // 8. Mantener fidelidad 1:1 de las coordenadas (X, Y, Z) generadas por el script Python.
+    // Solo normalizar si el script generó coordenadas descomunales (> 35m) o microscópicas (< 0.08m),
+    // y alinear sobre el pedestal Y=0.02 si el objeto quedó enterrado bajo el suelo.
     let autoScaleFactor = 1;
-    if (isZUp && objectsCreatedCount > 0 && meshes.length > 0) {
+    if (objectsCreatedCount > 0 && meshes.length > 0) {
       let minX = Infinity, maxX = -Infinity;
       let minY = Infinity, maxY = -Infinity;
       let minZ = Infinity, maxZ = -Infinity;
@@ -6233,9 +8966,8 @@ export async function executeBlenderPythonScript(
       const heightY = maxY - minY;
       const spanMax = Math.max(maxX - minX, heightY, maxZ - minZ);
 
-      // Si el modelo de la web es gigantesco (> 4.2m) o diminuto (< 0.6m), normalizar a ~2.6m de altura
-      if (Number.isFinite(spanMax) && (spanMax > 4.2 || spanMax < 0.6) && spanMax > 0.001) {
-        const normFactor = 2.6 / spanMax;
+      if (Number.isFinite(spanMax) && (spanMax > 35.0 || spanMax < 0.08) && spanMax > 0.0001) {
+        const normFactor = 3.0 / spanMax;
         autoScaleFactor = normFactor;
         const centerX = (minX + maxX) * 0.5;
         const centerZ = (minZ + maxZ) * 0.5;
@@ -6246,9 +8978,9 @@ export async function executeBlenderPythonScript(
           m.scale.multiplyScalar(normFactor);
         });
         logs.push(
-          `[Blender 5.2 Auto-Scale]: Escala normalizada (factor=${normFactor.toFixed(2)}) y apoyada en pedestal.`
+          `[Blender 5.2 Auto-Scale]: Escala extrema normalizada (factor=${normFactor.toFixed(2)}) y apoyada en pedestal.`
         );
-      } else if (Number.isFinite(minY) && (minY < -0.05 || minY > 0.65)) {
+      } else if (Number.isFinite(minY) && minY < -0.05) {
         const shiftY = 0.02 - minY;
         meshes.forEach((m) => {
           m.position.y += shiftY;
@@ -6291,15 +9023,290 @@ export async function executeBlenderPythonScript(
       coordinateModeUsed: isZUp ? 'blender_z_up' : 'studio_y_up',
     };
   } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : String(err);
-    logs.push(`Error en ejecución: ${errorMsg}`);
+    const diag = buildDetailedPythonErrorReport(err, rawSourceLines, transpiledStatementsForDiag);
+    logs.push(...diag.reportLines);
     return {
       success: false,
       logs,
       executionTimeMs: Math.round(performance.now() - startTime),
       verticesModified: 0,
       coordinateModeUsed: isZUp ? 'blender_z_up' : 'studio_y_up',
-      error: errorMsg,
+      error: diag.shortSummary,
+      errorLine: diag.errorLine,
+      errorSourceCode: diag.errorSourceCode,
+      errorReason: diag.errorReason,
     };
   }
+}
+
+/**
+ * Comprueba antes de transpilar si existen comillas sin cerrar o paréntesis/corchetes/llaves desbalanceados,
+ * devolviendo el número exacto de línea (1-indexed) y la explicación en español.
+ */
+function diagnosePythonStructureBeforeTranspile(
+  sourceLines: string[]
+): { line: number; reason: string } | null {
+  const bracketStack: { char: string; expected: string; line: number }[] = [];
+  let inTripleQuote: { quote: '"""' | "'''"; startLine: number } | null = null;
+
+  for (let idx = 0; idx < sourceLines.length; idx++) {
+    const lineNum = idx + 1;
+    const line = sourceLines[idx];
+    let i = 0;
+    let inSingleQuote: { quote: '"' | "'"; col: number } | null = null;
+
+    while (i < line.length) {
+      if (inTripleQuote) {
+        if (line.slice(i, i + 3) === inTripleQuote.quote && line[i - 1] !== '\\') {
+          inTripleQuote = null;
+          i += 3;
+          continue;
+        }
+        i++;
+        continue;
+      }
+
+      const ch = line[i];
+
+      if (inSingleQuote) {
+        if (ch === '\\') {
+          i += 2;
+          continue;
+        }
+        if (ch === inSingleQuote.quote) {
+          inSingleQuote = null;
+        }
+        i++;
+        continue;
+      }
+
+      if (ch === '#') {
+        break; // Comentario hasta fin de línea
+      }
+
+      const next3 = line.slice(i, i + 3);
+      if (next3 === '"""' || next3 === "'''") {
+        inTripleQuote = { quote: next3, startLine: lineNum };
+        i += 3;
+        continue;
+      }
+
+      if (ch === '"' || ch === "'") {
+        inSingleQuote = { quote: ch, col: i + 1 };
+        i++;
+        continue;
+      }
+
+      if (ch === '(' || ch === '[' || ch === '{') {
+        const expected = ch === '(' ? ')' : ch === '[' ? ']' : '}';
+        bracketStack.push({ char: ch, expected, line: lineNum });
+      } else if (ch === ')' || ch === ']' || ch === '}') {
+        if (bracketStack.length === 0) {
+          return {
+            line: lineNum,
+            reason: `Símbolo de cierre '${ch}' inesperado en la línea ${lineNum} (no hay ningún paréntesis/corchete abierto que le corresponda).`,
+          };
+        }
+        const top = bracketStack[bracketStack.length - 1];
+        if (top.expected !== ch) {
+          return {
+            line: lineNum,
+            reason: `En la línea ${lineNum} se encontró '${ch}', pero se esperaba cerrar '${top.expected}' (correspondiente al '${top.char}' abierto en la línea ${top.line}).`,
+          };
+        }
+        bracketStack.pop();
+      }
+
+      i++;
+    }
+
+    if (inSingleQuote && !/\\\s*$/.test(line)) {
+      return {
+        line: lineNum,
+        reason: `Comilla de texto (${inSingleQuote.quote}) sin cerrar en la línea ${lineNum} (columna ${inSingleQuote.col}).`,
+      };
+    }
+  }
+
+  if (inTripleQuote) {
+    return {
+      line: inTripleQuote.startLine,
+      reason: `Bloque de texto multilínea (${inTripleQuote.quote}) abierto en la línea ${inTripleQuote.startLine} pero nunca se cerró al final del script.`,
+    };
+  }
+
+  if (bracketStack.length > 0) {
+    const unclosed = bracketStack[bracketStack.length - 1];
+    return {
+      line: unclosed.line,
+      reason: `El símbolo '${unclosed.char}' abierto en la línea ${unclosed.line} no se cerró nunca (falta '${unclosed.expected}'). Comprueba si el código copiado está incompleto o cortado.`,
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Si `new AsyncFunction` lanza un `SyntaxError`, localiza la línea exacta de Python probando
+ * cada sentencia transpilada y analizando las líneas originales del script.
+ */
+function findSyntaxErrorPythonLine(
+  sourceLines: string[],
+  statements: { pyLine: number; jsText: string }[],
+  _compileErr: unknown
+): number {
+  // 1. Buscar cabeceras de bloque en Python que hayan olvidado los dos puntos ':' al final
+  for (let i = 0; i < sourceLines.length; i++) {
+    const clean = sourceLines[i].replace(/#.*$/, '').trim();
+    if (!clean) continue;
+    if (
+      /^(?:def\s+\w+\s*\(.*\)|class\s+\w+.*|if\s+.+|elif\s+.+|else|for\s+.+\s+in\s+.+|while\s+.+|try|except\b.*|finally|with\s+.+)$/.test(
+        clean
+      ) &&
+      !clean.endsWith(':') &&
+      !clean.endsWith('\\') &&
+      !clean.endsWith(',') &&
+      !clean.endsWith('(')
+    ) {
+      return i + 1;
+    }
+  }
+
+  // 2. Probar cada sentencia individualmente con Function para detectar cuál tiene sintaxis inválida
+  const AsyncFn = Object.getPrototypeOf(async function () {}).constructor;
+  for (const stmt of statements) {
+    const testSnippet = stmt.jsText
+      .replace(/^\s*return\b/, 'void ')
+      .replace(/\b(?:continue|break)\b/g, 'void 0');
+    try {
+      new AsyncFn(testSnippet);
+    } catch {
+      return stmt.pyLine;
+    }
+  }
+
+  return statements.length > 0 ? statements[statements.length - 1].pyLine : 1;
+}
+
+/**
+ * Construye un diagnóstico detallado en español indicando exactamente en qué línea falló el script,
+ * qué código hay en esa línea, por qué falló y cómo corregirlo.
+ */
+function buildDetailedPythonErrorReport(
+  err: unknown,
+  sourceLines: string[],
+  statements: { pyLine: number; jsText: string }[]
+): {
+  errorLine: number;
+  errorSourceCode: string;
+  errorReason: string;
+  shortSummary: string;
+  reportLines: string[];
+} {
+  const rawMsg = err instanceof Error ? err.message : String(err);
+  let pyLine = Number((err as any)?.__pyLine) || 0;
+
+  if (!pyLine || pyLine < 1 || pyLine > sourceLines.length) {
+    pyLine = findSyntaxErrorPythonLine(sourceLines, statements, err);
+  }
+  pyLine = Math.max(1, Math.min(sourceLines.length || 1, pyLine));
+
+  const errorSourceCode = (sourceLines[pyLine - 1] ?? '').trim();
+  const explicitReason = (err as any)?.__pyReason as string | undefined;
+
+  let errorReason = explicitReason || '';
+  let fixSuggestion = 'Revisa la sintaxis de esta línea en el editor.';
+
+  if (!errorReason) {
+    const notDefinedMatch = rawMsg.match(/([a-zA-Z_]\w*)\s+is not defined/i);
+    const notAFunctionMatch = rawMsg.match(/([^\s]+)\s+is not a function/i);
+    const propUndefReadMatch = rawMsg.match(
+      /Cannot read propert(?:y|ies) of (?:undefined|null) \(reading '([^']+)'\)/i
+    );
+    const propUndefSetMatch = rawMsg.match(
+      /Cannot set propert(?:y|ies) of (?:undefined|null) \(setting '([^']+)'\)/i
+    );
+    const notIterableMatch = rawMsg.match(/([^\s]+)\s+is not iterable/i);
+    const alreadyDeclaredMatch = rawMsg.match(/Identifier '([^']+)' has already been declared/i);
+
+    if (notDefinedMatch) {
+      const missingIdent = notDefinedMatch[1];
+      errorReason = `NameError / ReferenceError: La variable o función '${missingIdent}' no está definida cuando se ejecuta la línea ${pyLine}.`;
+      fixSuggestion = `Asegúrate de haber creado '${missingIdent} = ...' o 'def ${missingIdent}(...):' antes de la línea ${pyLine}, o revisa si hay una errata en el nombre.`;
+    } else if (notAFunctionMatch) {
+      const targetExpr = notAFunctionMatch[1];
+      errorReason = `TypeError: Se intentó llamar a '${targetExpr}' como si fuera una función en la línea ${pyLine}, pero no es una función.`;
+      fixSuggestion = `Verifica que no hayas sobrescrito el nombre de una función con una variable del mismo nombre, o que no falte el signo '*' de multiplicar antes de un paréntesis.`;
+    } else if (propUndefReadMatch) {
+      const propName = propUndefReadMatch[1];
+      errorReason = `AttributeError / TypeError: Se intentó leer el atributo '.${propName}' de un objeto que vale None (vacío/inexistente) en la línea ${pyLine}.`;
+      fixSuggestion = `Comprueba que el objeto, material o nodo antes de '.${propName}' exista realmente antes de acceder a sus propiedades.`;
+    } else if (propUndefSetMatch) {
+      const propName = propUndefSetMatch[1];
+      errorReason = `AttributeError / TypeError: Se intentó modificar el atributo '.${propName}' en un objeto que vale None (vacío/inexistente) en la línea ${pyLine}.`;
+      fixSuggestion = `Comprueba que el objeto antes de '.${propName}' se haya creado correctamente.`;
+    } else if (notIterableMatch) {
+      errorReason = `TypeError: El valor evaluado en la línea ${pyLine} no es iterable (no es una lista, tupla ni rango válido para recorrer o desempaquetar).`;
+      fixSuggestion = `Asegúrate de que la expresión después de 'in' o a la derecha del '=' devuelva una colección o tupla de elementos.`;
+    } else if (alreadyDeclaredMatch) {
+      const ident = alreadyDeclaredMatch[1];
+      errorReason = `Conflicto de declaración con el identificador '${ident}' en la línea ${pyLine}.`;
+      fixSuggestion = `Usa un nombre de variable distinto para '${ident}' en esta línea.`;
+    } else if (err instanceof SyntaxError || /Unexpected|Invalid/i.test(rawMsg)) {
+      const cleanSrc = errorSourceCode.replace(/#.*$/, '').trim();
+      if (
+        /^(?:def|class|if|elif|else|for|while|try|except|finally|with)\b/.test(cleanSrc) &&
+        !cleanSrc.endsWith(':')
+      ) {
+        errorReason = `SyntaxError: Falta el signo de dos puntos ':' al final de la sentencia de bloque en la línea ${pyLine}.`;
+        fixSuggestion = `Añade ':' al final de la línea ${pyLine} -> ${cleanSrc}:`;
+      } else if (/^(?:if|elif|while)\b[^=]*[^=!<>]=\s*[^=]/.test(cleanSrc)) {
+        errorReason = `SyntaxError: Se usó '=' (asignación) en lugar de '==' (comparación de igualdad) dentro de la condición en la línea ${pyLine}.`;
+        fixSuggestion = `Cambia '=' por '==' en la condición de la línea ${pyLine}.`;
+      } else if (
+        cleanSrc.split(/\s+/).length >= 4 &&
+        !/[=()\[\]{}:.,+\-*/]/.test(cleanSrc)
+      ) {
+        errorReason = `SyntaxError: La línea ${pyLine} parece texto explicativo normal (no código Python) copiado junto al script.`;
+        fixSuggestion = `Borra la línea ${pyLine} o coméntala poniendo '#' al principio.`;
+      } else {
+        errorReason = `SyntaxError en la línea ${pyLine}: Sintaxis de Python inválida o expresión incompleta (${rawMsg}).`;
+        fixSuggestion = `Revisa los paréntesis, comas, operadores y dos puntos ':' en la línea ${pyLine}.`;
+      }
+    } else {
+      errorReason = `Error en la línea ${pyLine}: ${rawMsg}`;
+    }
+  } else {
+    fixSuggestion = `Corrige el cierre de paréntesis, corchetes o comillas señalado en la línea ${pyLine}.`;
+  }
+
+  const contextStart = Math.max(1, pyLine - 2);
+  const contextEnd = Math.min(sourceLines.length, pyLine + 2);
+  const contextLines: string[] = [];
+  for (let ln = contextStart; ln <= contextEnd; ln++) {
+    const prefix = ln === pyLine ? '👉' : '  ';
+    const numStr = String(ln).padStart(4, ' ');
+    contextLines.push(`${prefix} ${numStr} | ${sourceLines[ln - 1]}`);
+  }
+
+  const reportLines = [
+    `============================================================`,
+    `❌ ERROR EN LA LÍNEA ${pyLine} DEL SCRIPT PYTHON`,
+    `============================================================`,
+    `📍 Línea ${pyLine}: ${errorSourceCode || '(línea vacía o final de bloque)'}`,
+    `❓ Por qué falla: ${errorReason}`,
+    `💡 Cómo solucionarlo: ${fixSuggestion}`,
+    `------------------------------------------------------------`,
+    `Fragmento del código (líneas ${contextStart} a ${contextEnd}):`,
+    ...contextLines,
+    `============================================================`,
+  ];
+
+  return {
+    errorLine: pyLine,
+    errorSourceCode,
+    errorReason: `${errorReason} ${fixSuggestion}`,
+    shortSummary: `Línea ${pyLine}: ${errorReason}`,
+    reportLines,
+  };
 }
