@@ -40,3 +40,9 @@ para que conserven su propio nodo y su pista.
 - El desplazamiento se multiplica por el mismo factor que el auto-escalado del modelo.
 - Un script que cambie la escala de un objeto animado no ajusta la trayectoria.
 - El agua solo se ve animada en la app; el motor de juegos recibe el color liso.
+
+## Nombres de las mallas animadas
+
+Cada objeto con `bpy.anim.loop` recibe un nombre único al registrarse (por ejemplo
+`Gota_12`). Los lectores de glTF enlazan cada pista por el nombre del nodo: si varias gotas
+compartieran nombre, todas se moverían con la misma pista y solo se vería una.

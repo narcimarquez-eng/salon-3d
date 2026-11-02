@@ -56,7 +56,14 @@ const WATER_FRAGMENT = /* glsl */ `
   }
 `;
 
+// Contador para dar un nombre único a cada malla animada: los lectores de glTF enlazan
+// las pistas por nombre de nodo, y varias gotas con el mismo nombre se mueven todas a la vez
+// (solo se ve una).
+let loopSeq = 0;
+
 export function addBlenderLoop(entry: LoopEntry): void {
+  loopSeq += 1;
+  entry.object.name = `${entry.object.name}_${loopSeq}`;
   loops.push(entry);
   pending.push(entry);
 }
