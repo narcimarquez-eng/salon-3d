@@ -1199,6 +1199,46 @@ function extractSafeColor(rawColor: unknown, fallbackHex: number): THREE.Color {
   return new THREE.Color(fallbackHex);
 }
 
+/**
+ * Las texturas generadas en canvas (procedurales) pesan mucho como PNG y no tienen transparencia real:
+ * si el canal alfa es opaco se exportan como JPEG (pérdida mínima, PSNR > 45 dB).
+ */
+function markOpaqueTextureAsJpeg(tex: THREE.Texture): void {
+  if (tex.userData.mimeType) return;
+  const img = tex.image as CanvasImageSource | undefined;
+  if (!img) return;
+  // DataTexture: píxeles RGBA directos en `data`
+  const raw = tex.image as { data?: ArrayLike<number>; width?: number; height?: number } | undefined;
+  if (raw && raw.data && raw.width && raw.height && !(img as unknown as { getContext?: unknown }).getContext) {
+    const px = raw.data;
+    if (px.length < raw.width * raw.height * 4) return;
+    for (let i = 3; i < raw.width * raw.height * 4; i += 4) {
+      if (px[i] !== 255) return;
+    }
+    tex.userData.mimeType = 'image/jpeg';
+    return;
+  }
+  if (typeof document === 'undefined') return;
+  try {
+    const w = (img as { width: number }).width;
+    const h = (img as { height: number }).height;
+    if (!w || !h) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return;
+    ctx.drawImage(img, 0, 0);
+    const data = ctx.getImageData(0, 0, w, h).data;
+    for (let i = 3; i < data.length; i += 4) {
+      if (data[i] !== 255) return;
+    }
+    tex.userData.mimeType = 'image/jpeg';
+  } catch {
+    // Canvas no legible (p. ej. origen externo): se exporta con el formato por defecto
+  }
+}
+
 function isExportableImageSource(img: unknown): boolean {
   if (!img || typeof img !== 'object') return false;
   if (typeof HTMLCanvasElement !== 'undefined' && img instanceof HTMLCanvasElement) return true;
@@ -1348,8 +1388,10 @@ export async function exportModifiedGlb(
             pbrMat.map &&
             isExportableImageSource(pbrMat.map.image)
           ) {
+            markOpaqueTextureAsJpeg(pbrMat.map);
             cleanMat.map = pbrMat.map;
             if (pbrMat.bumpMap && isExportableImageSource(pbrMat.bumpMap.image)) {
+              markOpaqueTextureAsJpeg(pbrMat.bumpMap);
               cleanMat.bumpMap = pbrMat.bumpMap;
               cleanMat.bumpScale = pbrMat.bumpScale ?? 0.02;
             }
