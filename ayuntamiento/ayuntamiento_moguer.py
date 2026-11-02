@@ -41,17 +41,22 @@ def material(nombre, color, rugosidad=0.8, metalico=0.0, mapa=None, escala_m=3.0
 mat_cal        = material("Cal_Blanca_Fachada", (0.94, 0.92, 0.86, 1.0), 0.85, mapa="cal_blanca", escala_m=2.0)
 mat_ocre       = material("Ocre_Amarillo_Molduras", (0.90, 0.70, 0.30, 1.0), 0.60)
 mat_zocalo     = material("Zocalo_Piedra_Gris", (0.58, 0.55, 0.50, 1.0), 0.90)
+mat_zocalo.texture = "stone_ashlar"
 mat_teja       = material("Teja_Cubierta_Terracota", (0.60, 0.30, 0.18, 1.0), 0.80, mapa="teja_arcilla", escala_m=2.5)
+mat_teja.texture = "terracotta_roof"
 mat_hueco      = material("Hueco_Sombra_Interior", (0.09, 0.07, 0.06, 1.0), 0.95)
 mat_madera     = material("Madera_Puerta_Consistorial", (0.30, 0.18, 0.10, 1.0), 0.70)
+mat_madera.texture = "wood_oak"
 mat_forja      = material("Forja_Negra_Rejas", (0.08, 0.08, 0.09, 1.0), 0.40, 0.80)
 mat_reloj      = material("Esfera_Reloj_Marfil", (0.97, 0.96, 0.92, 1.0), 0.35)
 mat_empedrado  = material("Plaza_Empedrado_Claro", (0.78, 0.74, 0.66, 1.0), 0.90)
 mat_tronco     = material("Tronco_Palmera", (0.45, 0.34, 0.22, 1.0), 0.90)
+mat_tronco.texture = "tree_bark"
 mat_palma      = material("Hojas_Palmera", (0.16, 0.42, 0.14, 1.0), 0.70)
 mat_bandera_v  = material("Bandera_Verde_Andalucia", (0.05, 0.50, 0.24, 1.0), 0.70)
 mat_bandera_b  = material("Bandera_Blanca", (0.95, 0.95, 0.95, 1.0), 0.70)
 mat_mastil     = material("Metal_Mastil", (0.60, 0.60, 0.60, 1.0), 0.30, 0.90)
+mat_mastil.texture = "brushed_metal"
 
 # ==========================================
 # 2. PRIMITIVAS Y CONSTRUCTORES

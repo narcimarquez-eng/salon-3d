@@ -2538,8 +2538,6 @@ export default function App() {
     pushUndoSnapshot(refs.currentModelWrapper);
     let activeShadingMode: ShadingModeType = settingsRef.current.shadingMode;
     const result = await executeBlenderPythonScript(code, refs.currentModelWrapper, {
-      // Texturas por nombre solo para las plantillas integradas (aspecto conservado); el código pegado o generado no las usa
-      inferTexturesFromNames: BLENDER_SCRIPT_PRESETS.some((preset) => preset.code.trim() === code.trim()),
       onTextureChange: (tex) => setActiveTexture(tex),
       onTextureSettingsChange: (opts) => {
         if (opts.repeatScale !== undefined) setTextureRepeatScale(opts.repeatScale);

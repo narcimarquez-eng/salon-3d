@@ -132,29 +132,47 @@ def material(nombre, color, rugosidad=0.8, metalico=0.0, emision=0.0):
 
 # Paleta cromática histórica de Sevilla (piedra albero, ladrillo almohade, oro, bronce)
 mat_albero       = material("Piedra_Albero_Sevilla", (0.82, 0.72, 0.54, 1.0), 0.82)
+mat_albero.texture = "stone_ashlar"
 mat_albero_osc   = material("Piedra_Albero_Oscura", (0.66, 0.56, 0.40, 1.0), 0.88)
+mat_albero_osc.texture = "stone_ashlar"
 mat_albero_claro = material("Piedra_Labrada_Clara", (0.90, 0.83, 0.68, 1.0), 0.72)
+mat_albero_claro.texture = "stone_ashlar"
 mat_ladrillo_gir = material("Ladrillo_Almohade_Giralda", (0.76, 0.54, 0.38, 1.0), 0.80)
+mat_ladrillo_gir.texture = "brick_mudejar"
 mat_sebka        = material("Relieve_Sebka_Albero", (0.88, 0.77, 0.60, 1.0), 0.75)
+mat_sebka.texture = "stone_ashlar"
 mat_marmol_bl    = material("Marmol_Blanco", (0.92, 0.90, 0.86, 1.0), 0.25)
+mat_marmol_bl.texture = "marble_carrara"
 mat_marmol_negro = material("Marmol_Negro_Veteado", (0.14, 0.14, 0.16, 1.0), 0.20)
+mat_marmol_negro.texture = "marble_nero"
 mat_teja_cupula  = material("Cubierta_Piedra_Teja", (0.52, 0.42, 0.32, 1.0), 0.78)
+mat_teja_cupula.texture = "terracotta_roof"
 mat_pizarra      = material("Cubierta_Crucero", (0.28, 0.30, 0.34, 1.0), 0.70)
 mat_oro          = material("Oro_Retablo_Giraldillo", (0.92, 0.74, 0.22, 1.0), 0.22, 0.95)
+mat_oro.texture = "gold_damascene"
 mat_bronce       = material("Bronce_Campanas_Giraldillo", (0.38, 0.30, 0.18, 1.0), 0.35, 0.85)
+mat_bronce.texture = "copper_patina"
 mat_hierro       = material("Forja_Rejas_Sevilla", (0.12, 0.12, 0.14, 1.0), 0.40, 0.80)
 mat_madera_coro  = material("Caoba_Silleria_Coro", (0.26, 0.13, 0.07, 1.0), 0.48)
+mat_madera_coro.texture = "stone_ashlar"
 mat_madera_puerta= material("Madera_Portones", (0.22, 0.14, 0.08, 1.0), 0.70)
+mat_madera_puerta.texture = "wood_oak"
 mat_tronco       = material("Tronco_Naranjo", (0.32, 0.21, 0.12, 1.0), 0.90)
+mat_tronco.texture = "tree_bark"
 mat_hoja_naranjo = material("Copa_Naranjo", (0.14, 0.36, 0.14, 1.0), 0.75)
 mat_naranja      = material("Fruto_Naranja", (0.95, 0.45, 0.05, 1.0), 0.50)
 mat_agua         = material("Agua_Fuente_Mudejar", (0.15, 0.52, 0.65, 1.0), 0.10)
+mat_agua.texture = "brick_mudejar"
 mat_espuma       = material("Espuma_Surtidor", (0.88, 0.96, 1.0, 1.0), 0.20, 0.0, 0.4)
 mat_vidriera_az  = material("Vidriera_Azul_Cobalto", (0.18, 0.48, 0.95, 1.0), 0.15, 0.0, 1.8)
+mat_vidriera_az.texture = "stained_glass"
 mat_vidriera_ro  = material("Vidriera_Rojo_Rubi", (0.95, 0.22, 0.18, 1.0), 0.15, 0.0, 1.6)
+mat_vidriera_ro.texture = "stained_glass"
 mat_vidriera_am  = material("Vidriera_Ambar_Oro", (0.98, 0.76, 0.20, 1.0), 0.15, 0.0, 2.0)
+mat_vidriera_am.texture = "stained_glass"
 mat_luz_calida   = material("Luz_Interior_Sagrada", (1.0, 0.88, 0.62, 1.0), 0.10, 0.0, 3.2)
 mat_terracota    = material("Pavimento_Ladrillo_Patio", (0.68, 0.42, 0.28, 1.0), 0.85)
+mat_terracota.texture = "brick_mudejar"
 
 # ==========================================
 # 2. PRIMITIVAS Y CONSTRUCTORES GEOMÉTRICOS
@@ -652,9 +670,12 @@ def asignar_mat(obj, mat):
 
 # Materiales Principled BSDF de Blender 5.2
 mat_titanio = crear_material_bsdf("Titanio_Oscuro", (0.16, 0.20, 0.28, 1.0), metalico=0.85, rugosidad=0.25)
+mat_titanio.texture = "brushed_metal"
 mat_carmesi = crear_material_bsdf("Armadura_Carmesi", (0.88, 0.14, 0.28, 1.0), metalico=0.45, rugosidad=0.30)
 mat_oro = crear_material_bsdf("Oro_Imperial", (0.98, 0.74, 0.14, 1.0), metalico=0.92, rugosidad=0.18)
+mat_oro.texture = "gold_damascene"
 mat_plasma = crear_material_bsdf("Plasma_Cian", (0.06, 0.88, 0.98, 1.0), emision=4.5)
+mat_plasma.texture = "solar_plasma"
 
 # Torso blindado (En Blender 5.2 el eje Z es la altura vertical)
 bpy.ops.mesh.primitive_cube_add(size=1.0, location=(0, 0, 1.55))
@@ -3500,8 +3521,6 @@ export async function executeBlenderPythonScript(
   script: string,
   modelWrapper: THREE.Object3D,
   callbacks?: {
-    /** Solo para plantillas integradas: asignar textura procedural según el nombre del material (comportamiento heredado) */
-    inferTexturesFromNames?: boolean;
     onTextureChange?: (texName: TexturePatternType) => void;
     onTextureSettingsChange?: (opts: {
       activeTexture?: TexturePatternType;
@@ -3892,10 +3911,8 @@ export async function executeBlenderPythonScript(
 
   const createBlenderMaterial = (matName: string = 'Material'): BlenderMaterialInstance => {
     // Inferencia automática de textura procedural si el nombre del material indica piedra, madera, mármol, ladrillo, agua, etc.
-    // Como en Blender, el nombre del material no asigna textura: solo `mat.texture = "..."` o los presets integrados
-    const inferredTex: TexturePatternType = callbacks?.inferTexturesFromNames
-      ? resolveTexturePatternId(matName)
-      : 'none';
+    // Como en Blender, el nombre del material no asigna textura: solo `mat.texture = "..."` en el script
+    const inferredTex: TexturePatternType = 'none';
     const presetBump = inferredTex !== 'none' ? getTexturePresetInfo(inferredTex).pbr.bumpScale : 0.035;
 
     const matObj: BlenderMaterialInstance = {
@@ -4284,6 +4301,10 @@ export async function executeBlenderPythonScript(
         }
         if (prop === 'texture' || prop === 'pattern' || prop === 'textura') {
           target._texturePattern = resolveTexturePatternId(String(value));
+          // Como al crear un material con patrón: el relieve toma el valor del patrón si no se fijó otro
+          if (target._texturePattern !== 'none' && target._bumpScale === 0.035) {
+            target._bumpScale = getTexturePresetInfo(target._texturePattern).pbr.bumpScale;
+          }
           target._sync();
           return true;
         }
