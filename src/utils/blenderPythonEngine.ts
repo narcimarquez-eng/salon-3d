@@ -211,12 +211,15 @@ caja("Suelo_Catedral_Base", (0, 0, -0.15), (78.0, 54.0, 0.3), mat_marmol_bl)
 # Damero interior de mármol blanco y negro
 for ix in range(-6, 7):
     for iy in range(-4, 5):
-        mat_dam = mat_marmol_bl if (ix + iy) % 2 == 0 else mat_marmol_negro
+        paridad = (ix + iy) % 2
+        mat_dam = mat_marmol_negro
+        if paridad == 0:
+            mat_dam = mat_marmol_bl
         caja(f"Damero_{ix}_{iy}", (ix * 5.0, iy * 5.0, 0.02), (4.9, 4.9, 0.04), mat_dam)
 
 # Columnas con cadenas perimetrales de la Lonja de Sevilla
 for lx in range(-42, 47, 8):
-    for ly in (-34, 54):
+    for ly in [-34, 54]:
         cilindro(f"Col_Lonja_{lx}_{ly}", (lx, ly, 0.9), 0.28, 1.8, mat_albero_osc, vertices=10)
         caja(f"Cadena_Lonja_{lx}_{ly}", (lx + 4.0, ly, 0.95), (8.0, 0.08, 0.08), mat_hierro)
 
@@ -229,7 +232,7 @@ lineas_y = [-18.5, -12.5, -6.0, 6.0, 12.5, 18.5]
 def pilar_fasciculado(nombre, x, y, alto):
     cilindro(f"{nombre}_Basa", (x, y, 0.6), 1.05, 1.2, mat_albero_osc, vertices=8)
     cilindro(f"{nombre}_Nucleo", (x, y, alto * 0.5), 0.78, alto, mat_albero, vertices=12)
-    for ang in (0, math.pi * 0.5, math.pi, math.pi * 1.5):
+    for ang in [0, math.pi * 0.5, math.pi, math.pi * 1.5]:
         bx = x + math.cos(ang) * 0.72
         by = y + math.sin(ang) * 0.72
         cilindro(f"{nombre}_Baq_{ang:.1f}", (bx, by, alto * 0.5), 0.22, alto, mat_albero_claro, vertices=8)
@@ -238,7 +241,11 @@ def pilar_fasciculado(nombre, x, y, alto):
 for ix, x in enumerate(tramos_x):
     for iy, y in enumerate(lineas_y):
         if abs(x) < 29.0:
-            h_pil = 25.0 if abs(y) == 6.0 else (18.5 if abs(y) == 12.5 else 13.0)
+            h_pil = 13.0
+            if abs(y) == 6.0:
+                h_pil = 25.0
+            if abs(y) == 12.5:
+                h_pil = 18.5
             if abs(x) == 0.0 and abs(y) == 6.0:
                 cilindro(f"Pilar_Toral_{iy}", (x, y, 13.0), 1.15, 26.0, mat_albero_claro, vertices=16)
             else:
@@ -247,7 +254,7 @@ for ix, x in enumerate(tramos_x):
 # ==========================================
 # 5. VOLÚMENES ESCALONADOS, AZOTEAS Y BÓVEDAS
 # ==========================================
-for s_y in (-1, 1):
+for s_y in [-1, 1]:
     y_cl = s_y * 6.0
     caja(f"Muro_Claristorio_{s_y}", (0.0, y_cl, 22.2), (60.0, 0.85, 7.6), mat_albero)
     caja(f"Cresteria_Central_{s_y}", (0.0, y_cl, 26.3), (60.4, 0.45, 0.9), mat_albero_claro)
@@ -260,7 +267,7 @@ caja("Faldones_Central_Norte", (0.0, 3.1, 27.3), (60.2, 6.8, 0.45), mat_teja_cup
 caja("Cumbrera_Central", (0.0, 0.0, 28.9), (60.4, 0.45, 0.45), mat_oro)
 
 # Naves Intermedias (H = 19.0 m)
-for s_y in (-1, 1):
+for s_y in [-1, 1]:
     yc = s_y * 9.25
     ym = s_y * 12.5
     caja(f"Cubierta_Nave_Intermedia_{s_y}", (0.0, yc, 18.6), (60.0, 6.6, 0.8), mat_teja_cupula)
@@ -268,7 +275,7 @@ for s_y in (-1, 1):
     caja(f"Pretil_Intermedia_{s_y}", (0.0, ym, 19.3), (60.4, 0.45, 0.8), mat_albero_claro)
 
 # Naves Laterales Externas (H = 13.5 m)
-for s_y in (-1, 1):
+for s_y in [-1, 1]:
     yc = s_y * 15.5
     ym = s_y * 18.5
     caja(f"Cubierta_Nave_Externa_{s_y}", (0.0, yc, 13.1), (60.0, 6.2, 0.8), mat_teja_cupula)
@@ -276,7 +283,7 @@ for s_y in (-1, 1):
     caja(f"Pretil_Externa_{s_y}", (0.0, ym, 13.8), (60.4, 0.45, 0.75), mat_albero_claro)
 
 # Capillas Perimetrales entre Contrafuertes (H = 9.5 m)
-for s_y in (-1, 1):
+for s_y in [-1, 1]:
     yc = s_y * 20.65
     ym = s_y * 22.8
     caja(f"Cubierta_Capillas_{s_y}", (0.0, yc, 9.2), (60.0, 4.4, 0.7), mat_teja_cupula)
@@ -315,7 +322,7 @@ for ix, x in enumerate(tramos_x):
     if abs(x) < 2.0:
         continue
 
-    for s_y in (-1, 1):
+    for s_y in [-1, 1]:
         caja(f"Contrafuerte_Ext_{ix}_{s_y}", (x, s_y * 23.2, 6.2), (1.35, 1.8, 12.4), mat_albero_osc)
         pinaculo_gotico(f"Pin_Ext_{ix}_{s_y}", x, s_y * 23.2, 12.4, escala=0.82)
 
@@ -337,7 +344,7 @@ for ix, x in enumerate(tramos_x):
         xm = (x + tramos_x[ix + 1]) * 0.5
         if abs(xm) > 4.5:
             mat_v = colores_vidriera[ix % 3]
-            for s_y in (-1, 1):
+            for s_y in [-1, 1]:
                 caja(f"Vidriera_Cl_{ix}_{s_y}", (xm, s_y * 6.05, 22.2), (3.4, 0.95, 4.6), mat_v)
                 caja(f"Vidriera_Int_{ix}_{s_y}", (xm, s_y * 12.55, 16.0), (3.2, 0.95, 3.6), colores_vidriera[(ix + 1) % 3])
                 caja(f"Vidriera_Cap_{ix}_{s_y}", (xm, s_y * 22.85, 5.2), (2.8, 1.1, 4.2), colores_vidriera[(ix + 2) % 3])
@@ -350,14 +357,14 @@ gx, gy = 26.5, 24.5
 caja("Giralda_Basamento", (gx, gy, 3.0), (13.6, 13.6, 6.0), mat_albero_osc)
 caja("Giralda_Cana_Almohade", (gx, gy, 27.0), (13.2, 13.2, 42.0), mat_ladrillo_gir)
 
-for sx in (-1, 1):
-    for sy in (-1, 1):
+for sx in [-1, 1]:
+    for sy in [-1, 1]:
         caja(f"Giralda_Esquina_{sx}_{sy}", (gx + sx * 6.45, gy + sy * 6.45, 27.0), (0.6, 0.6, 42.0), mat_albero_claro)
 
 niveles_sebka = [14.0, 26.5, 39.0]
 for nz in niveles_sebka:
     for cara in range(4):
-        for offset in (-3.4, 3.4):
+        for offset in [-3.4, 3.4]:
             if cara == 0:
                 px, py, sx, sy = gx + offset, gy - 6.65, 3.2, 0.28
             elif cara == 1:
@@ -386,8 +393,8 @@ for nz in niveles_sebka:
 caja("Giralda_Cornisa_Almohade", (gx, gy, 48.4), (14.4, 14.4, 1.0), mat_albero_claro)
 caja("Giralda_Balaustrada_Azucenas", (gx, gy, 49.4), (13.8, 13.8, 1.1), mat_albero)
 
-for sx in (-1, 1):
-    for sy in (-1, 1):
+for sx in [-1, 1]:
+    for sy in [-1, 1]:
         jx, jy = gx + sx * 6.5, gy + sy * 6.5
         cilindro(f"Pedestal_Azucena_{sx}_{sy}", (jx, jy, 50.4), 0.55, 1.2, mat_albero_claro, vertices=8)
         esfera(f"Jarra_Azucena_{sx}_{sy}", (jx, jy, 51.5), 0.5, mat_bronce, escala=(1, 1, 1.4))
@@ -395,13 +402,17 @@ for sx in (-1, 1):
 
 caja("Giralda_Cuerpo_Campanas_Nucleo", (gx, gy, 54.8), (10.6, 10.6, 10.5), mat_albero_claro)
 for cara in range(4):
-    for off in (-3.1, 0.0, 3.1):
+    for off in [-3.1, 0.0, 3.1]:
         if cara < 2:
-            s_dir = -1 if cara == 0 else 1
+            s_dir = 1
+            if cara == 0:
+                s_dir = -1
             cx, cy = gx + off, gy + s_dir * 5.35
             sx, sy = 1.6, 0.4
         else:
-            s_dir = 1 if cara == 2 else -1
+            s_dir = -1
+            if cara == 2:
+                s_dir = 1
             cx, cy = gx + s_dir * 5.35, gy + off
             sx, sy = 0.4, 1.6
         caja(f"Vano_Campana_{cara}_{off}", (cx, cy, 54.5), (sx, sy, 5.2), mat_marmol_negro)
@@ -434,7 +445,7 @@ esfera("Capilla_Real_Cupula", (36.0, 0.0, 22.0), 5.5, mat_teja_cupula, escala=(1
 cilindro("Capilla_Real_Linterna", (36.0, 0.0, 26.8), 1.3, 2.4, mat_albero_claro, vertices=8)
 cono("Capilla_Real_Chapitel", (36.0, 0.0, 28.8), 1.4, 0.08, 1.8, mat_oro, vertices=8)
 
-for s_y in (-1, 1):
+for s_y in [-1, 1]:
     caja(f"Cabecera_Colateral_{s_y}", (32.5, s_y * 13.5, 6.8), (5.5, 9.5, 13.6), mat_albero)
     pinaculo_gotico(f"Pin_Cabecera_{s_y}", 35.0, s_y * 17.5, 13.6, escala=0.8)
 
@@ -448,8 +459,12 @@ caja("Fachada_Oeste_Int_Norte", (fx, 9.2, 9.5), (1.3, 6.5, 19.0), mat_albero)
 caja("Fachada_Oeste_Ext_Sur", (fx, -15.5, 6.8), (1.2, 6.2, 13.6), mat_albero)
 caja("Fachada_Oeste_Ext_Norte", (fx, 15.5, 6.8), (1.2, 6.2, 13.6), mat_albero)
 
-for py in (-18.5, -12.5, -6.0, 6.0, 12.5, 18.5):
-    h_cf = 27.0 if abs(py) == 6.0 else (20.0 if abs(py) == 12.5 else 14.5)
+for py in [-18.5, -12.5, -6.0, 6.0, 12.5, 18.5]:
+    h_cf = 14.5
+    if abs(py) == 12.5:
+        h_cf = 20.0
+    if abs(py) == 6.0:
+        h_cf = 27.0
     caja(f"Contrafuerte_Oeste_{py}", (fx - 0.9, py, h_cf * 0.5), (1.8, 1.5, h_cf), mat_albero_claro)
     pinaculo_gotico(f"Pin_Oeste_{py}", fx - 0.9, py, h_cf, escala=0.95)
 
@@ -517,7 +532,7 @@ for nx in filas_naranjos_x:
         caja(f"Alcorque_{nx}_{ny}", (nx, ny, 0.18), (1.9, 1.9, 0.18), mat_albero_osc)
         cilindro(f"Tronco_Naranjo_{nx}_{ny}", (nx, ny, 1.25), 0.18, 2.3, mat_tronco, vertices=8)
         esfera(f"Copa_Naranjo_{nx}_{ny}", (nx, ny, 2.85), 1.45, mat_hoja_naranjo, escala=(1.0, 1.0, 0.88))
-        for ang_n in (0.4, 1.9, 3.5, 5.0):
+        for ang_n in [0.4, 1.9, 3.5, 5.0]:
             fx_n = nx + math.cos(ang_n) * 1.18
             fy_n = ny + math.sin(ang_n) * 1.18
             esfera(f"Naranja_{nx}_{ny}_{ang_n:.1f}", (fx_n, fy_n, 2.75), 0.14, mat_naranja)
@@ -544,7 +559,7 @@ for j_ch in range(6):
 # 12. INTERIOR MONUMENTAL: CORO, ÓRGANOS, RETABLO MAYOR Y TUMBA DE COLÓN
 # ==========================================
 caja("Coro_Trascoro_Marmol", (-15.0, 0.0, 3.2), (1.1, 10.6, 6.4), mat_marmol_bl)
-for s_y in (-1, 1):
+for s_y in [-1, 1]:
     caja(f"Coro_Muro_Lat_{s_y}", (-9.5, s_y * 5.0, 3.2), (11.0, 0.8, 6.4), mat_albero_claro)
     caja(f"Coro_Silleria_Alta_{s_y}", (-9.5, s_y * 4.2, 2.2), (9.8, 0.75, 4.4), mat_madera_coro)
     caja(f"Coro_Silleria_Baja_{s_y}", (-9.5, s_y * 3.3, 1.1), (9.2, 0.65, 2.0), mat_madera_coro)
@@ -574,13 +589,13 @@ caja("Retablo_Calvario_Cumbrera", (rx_m - 0.5, 0.0, 22.8), (0.9, 6.0, 2.2), mat_
 
 cx_col, cy_col = -3.5, -10.5
 caja("Colon_Pedestal_Marmol", (cx_col, cy_col, 0.7), (3.4, 2.4, 1.4), mat_marmol_bl)
-for sx in (-1, 1):
-    for sy in (-1, 1):
+for sx in [-1, 1]:
+    for sy in [-1, 1]:
         cilindro(f"Heraldo_Colon_{sx}_{sy}", (cx_col + sx * 1.0, cy_col + sy * 0.65, 2.3), 0.28, 1.9, mat_bronce, vertices=10)
         esfera(f"Cabeza_Heraldo_{sx}_{sy}", (cx_col + sx * 1.0, cy_col + sy * 0.65, 3.4), 0.22, mat_oro)
 caja("Feretro_Cristobal_Colon", (cx_col, cy_col, 3.7), (2.8, 1.35, 0.95), mat_oro)
 
-for lx in (-22.0, -15.0, 0.0, 12.0):
+for lx in [-22.0, -15.0, 0.0, 12.0]:
     cilindro(f"Cable_Lampara_{lx}", (lx, 0.0, 17.5), 0.04, 15.0, mat_hierro, vertices=6)
     esfera(f"Lampara_Votiva_{lx}", (lx, 0.0, 9.8), 0.55, mat_luz_calida)
 `,
