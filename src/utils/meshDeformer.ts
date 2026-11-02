@@ -957,6 +957,8 @@ function mergeKeyFor(mesh: THREE.Mesh): string | null {
   const metal = Math.round((mat.metalness ?? 0.0) * 100);
   const opacity = Math.round((mat.opacity ?? 1.0) * 100);
   const hasMap = mat.map ? mat.map.uuid : 'nomap';
+  const hasNormal = mat.normalMap ? mat.normalMap.uuid : 'nonormal';
+  const hasRough = mat.roughnessMap ? mat.roughnessMap.uuid : 'norough';
   return [
     mat.type,
     mat.color.getHex(),
@@ -968,6 +970,8 @@ function mergeKeyFor(mesh: THREE.Mesh): string | null {
     mat.transparent ? 1 : 0,
      mat.vertexColors ? 1 : 0,
     hasMap,
+    hasNormal,
+    hasRough,
     attrs,
   ].join('|');
 }
@@ -1212,7 +1216,7 @@ export async function exportModifiedGlb(
   const mode: GlbExportPresetMode = options.mode ?? 'light';
   const stripTextures = options.stripTextures ?? (mode === 'light' || mode === 'ultra_light');
   const maxTextureSize =
-    options.maxTextureSize ?? (mode === 'ultra_light' ? 64 : mode === 'light' ? 128 : 512);
+    options.maxTextureSize ?? (mode === 'ultra_light' ? 64 : mode === 'light' ? 128 : 1024);
   const weldVertices = options.weldVertices ?? true;
   const mergeByMaterial = options.mergeByMaterial ?? true;
   const decimateRatio =
@@ -1351,9 +1355,19 @@ export async function exportModifiedGlb(
             }
           }
 
+          // Normal y rugosidad (mapas PBR de "Mis texturas" y de las plantillas): se exportan junto al color
+          if (!stripTextures && pbrMat && 'normalMap' in pbrMat && pbrMat.normalMap && isExportableImageSource(pbrMat.normalMap.image)) {
+            cleanMat.normalMap = pbrMat.normalMap;
+            cleanMat.normalScale = (pbrMat as THREE.MeshStandardMaterial).normalScale?.clone() ?? new THREE.Vector2(1, 1);
+          }
+          if (!stripTextures && pbrMat && 'roughnessMap' in pbrMat && pbrMat.roughnessMap && isExportableImageSource(pbrMat.roughnessMap.image)) {
+            cleanMat.roughnessMap = pbrMat.roughnessMap;
+            cleanMat.roughness = 1; // el mapa de rugosidad multiplica este valor
+          }
+
           const allowedAttrs = new Set<string>(['position', 'normal']);
           if (keepVertexColors) allowedAttrs.add('color');
-          if (!stripTextures && cleanMat.map) allowedAttrs.add('uv');
+          if (!stripTextures && (cleanMat.map || cleanMat.normalMap || cleanMat.roughnessMap)) allowedAttrs.add('uv');
 
           for (const attrName of Object.keys(geo.attributes)) {
             if (!allowedAttrs.has(attrName)) {

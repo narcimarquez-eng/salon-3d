@@ -19,10 +19,11 @@ import {
   createThreeToneGradientTexture,
 } from './geometrySmoothing';
 import { getProceduralMatcapTexture, MatcapPresetId } from './matcapGenerator';
+import ayuntamientoMoguerCode from '../../ayuntamiento/ayuntamiento_moguer.py?raw';
 import { addBlenderLoop, setBlenderWater, startBlenderRun, finalizeBlenderRun } from './blenderAnimation';
 import {
   applyBoxProjectedUv,
-  getColorMapThreeTexture,
+  getColorMapSet,
   preloadColorMapImages,
   slugifyTextureId,
 } from './textureLibrary';
@@ -71,6 +72,16 @@ export interface BlenderScriptPreset {
 }
 
 export const BLENDER_SCRIPT_PRESETS: BlenderScriptPreset[] = [
+  // ============================================================================
+  // PLANTILLA: AYUNTAMIENTO DE MOGUER (script fuente en /ayuntamiento, con cal y teja CC0)
+  // ============================================================================
+  {
+    id: 'gen_ayuntamiento_moguer',
+    name: 'Ayuntamiento de Moguer (Huelva) con cal y teja',
+    category: 'generate',
+    description: 'Casa consistorial de dos plantas con arcadas, torre del reloj, plaza empedrada y palmeras. Cal blanca y teja de arcilla con texturas CC0 (color, normal y rugosidad).',
+    code: ayuntamientoMoguerCode,
+  },
   // ============================================================================
   // CATEGORÍA 1: GENERACIÓN PROCEDURAL DE NUEVOS OBJETOS 3D DESDE CERO EN PYTHON
   // ============================================================================
@@ -1640,7 +1651,8 @@ function applyMaterialToThreeMesh(
   }
 
   // Mapa de color con imagen: tiene prioridad sobre el procedural y se proyecta en metros
-  const imageColorMap = extraPbr?.colorMapId ? getColorMapThreeTexture(extraPbr.colorMapId) : null;
+  const imageSet = extraPbr?.colorMapId ? getColorMapSet(extraPbr.colorMapId) : null;
+  const imageColorMap = imageSet?.color ?? null;
   if (extraPbr?.colorMapId && !imageColorMap) {
     console.warn(`Textura de imagen "${extraPbr.colorMapId}" no cargada; se usa el color base.`);
   }
@@ -1650,6 +1662,8 @@ function applyMaterialToThreeMesh(
     mesh.userData.originalMap = imageColorMap;
     mesh.userData.originalBumpMap = null;
     mesh.userData.originalBumpScale = 0;
+    mesh.userData.originalNormalMap = imageSet?.normal ?? null;
+    mesh.userData.originalRoughnessMap = imageSet?.roughness ?? null;
     mesh.updateMatrix();
     applyBoxProjectedUv(
       mesh.geometry as THREE.BufferGeometry,
@@ -1662,6 +1676,8 @@ function applyMaterialToThreeMesh(
     mesh.userData.originalMap = procColorMap;
     mesh.userData.originalBumpMap = procBumpMap;
     mesh.userData.originalBumpScale = procBumpScale;
+    mesh.userData.originalNormalMap = null;
+    mesh.userData.originalRoughnessMap = null;
   }
   mesh.userData.imageMapApplied = Boolean(imageColorMap);
 
@@ -1720,6 +1736,10 @@ function applyMaterialToThreeMesh(
     stdMat.opacity = isTransparent ? Math.min(alphaVal, 1.0 - transVal * 0.55) : 1.0;
     stdMat.side = sideMode;
 
+    // Normal y rugosidad del mapa de imagen (la rugosidad del mapa sustituye al valor fijo)
+    stdMat.normalMap = imageSet?.normal ?? null;
+    stdMat.roughnessMap = imageSet?.roughness ?? null;
+    if (imageSet?.roughness) stdMat.roughness = 1.0;
     if (imageColorMap || procColorMap || hadImageMap) {
       stdMat.map = imageColorMap ?? procColorMap ?? null;
     }

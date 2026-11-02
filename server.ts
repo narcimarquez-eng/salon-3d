@@ -71,6 +71,7 @@ PUNTO 2. MALLAS 'from_pydata' Y TOPOLOGÍA DENSA 'bmesh' ('bmesh.ops.create_grid
 
 PUNTO 3. BIBLIOTECA COMPLETA DE 38 TEXTURAS PBR 3D + RELIEVE BUMP (POR OBJETO O GLOBAL) Y ALIAS:
 - Asignación por material: mat.texture = 'stone_ashlar'; mat.texture_repeat = 2; mat.bump_strength = 1.2 (o bsdf.inputs["Texture"].default_value = '...')
+- Texturas de IMAGEN reales (color + normal + rugosidad, CC0 y del usuario): mat.color_map = 'cal_blanca' (cal blanca, enfoscados y muros), mat.color_map = 'teja_arcilla' (teja árabe de arcilla), mat.color_map_scale = 2.0 (metros que ocupa una repetición; por defecto 3.0). Úsalo para muros de cal, tejados de teja y fachadas reales; las UV se proyectan en metros automáticamente. Si el usuario ha subido sus propias imágenes, también puede usarse mat.color_map = 'nombre_de_la_imagen'.
 - Asignación por objeto o global: bpy.ops.material.set_texture(name='stone_ashlar', object=obj, repeat=2, bump=1.2, natural_color=True)
 - Las 38 Texturas PBR + Bump disponibles:
   * Arquitectura y Piedra (11): 'stone_ashlar' (alias: 'piedra', 'silleria', 'caliza'), 'travertine_roman' ('travertino'), 'marble_carrara' ('marmol', 'carrara'), 'marble_nero' ('marmol_negro', 'marquina'), 'cobblestone' ('adoquin', 'empedrado'), 'brick_mudejar' ('ladrillo', 'mudejar'), 'terracotta_roof' ('teja', 'terracota'), 'slate_roof' ('pizarra'), 'andalusi_tiles' ('azulejo', 'ceramica'), 'stained_glass' ('vidriera', 'vitral'), 'concrete_brutalist' ('hormigon', 'cemento').

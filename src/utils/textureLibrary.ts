@@ -1,4 +1,4 @@
-// Biblioteca de texturas de imagen para usar como mapa de color.
+// Biblioteca de texturas para usar como mapa de color (con normal y rugosidad cuando existan).
 // - Incluye texturas CC0 empaquetadas en /public/textures (ver public/textures/CREDITS.md).
 // - Permite subir imágenes propias ("Mis texturas"), guardadas en IndexedDB de este navegador.
 // - Desde Python (motor bpy) se usan por nombre: mat.color_map = "cal_blanca"
@@ -11,10 +11,20 @@ export interface ColorMapTextureInfo {
   /** Nombre visible en la interfaz */
   name: string;
   source: 'builtin' | 'user';
-  /** URL de la imagen (ruta pública para las incluidas, blob: para las subidas) */
+  /** URL de la imagen de color (ruta pública para las incluidas, blob: para las subidas) */
   url: string;
+  /** Mapas PBR opcionales (solo en las incluidas) */
+  normalUrl?: string;
+  roughnessUrl?: string;
   /** Licencia/origen mostrado en la interfaz */
   license?: string;
+}
+
+/** Conjunto de texturas three.js listo para asignar a un material */
+export interface ColorMapSet {
+  color: THREE.Texture;
+  normal: THREE.Texture | null;
+  roughness: THREE.Texture | null;
 }
 
 const BASE_URL = (import.meta as unknown as { env?: { BASE_URL?: string } }).env?.BASE_URL ?? '/';
@@ -25,14 +35,18 @@ const BUILTIN_TEXTURES: ColorMapTextureInfo[] = [
     name: 'Cal blanca',
     source: 'builtin',
     url: `${BASE_URL}textures/cal_blanca_diff_1k.jpg`,
-    license: 'CC0 · Poly Haven (White Rough Plaster)',
+    normalUrl: `${BASE_URL}textures/cal_blanca_nor_gl_1k.jpg`,
+    roughnessUrl: `${BASE_URL}textures/cal_blanca_rough_1k.jpg`,
+    license: 'CC0 · Poly Haven (White Rough Plaster) · color + normal + rugosidad',
   },
   {
     id: 'teja_arcilla',
     name: 'Teja de arcilla',
     source: 'builtin',
     url: `${BASE_URL}textures/teja_arcilla_diff_1k.jpg`,
-    license: 'CC0 · Poly Haven (Clay Roof Tiles 02)',
+    normalUrl: `${BASE_URL}textures/teja_arcilla_nor_gl_1k.jpg`,
+    roughnessUrl: `${BASE_URL}textures/teja_arcilla_rough_1k.jpg`,
+    license: 'CC0 · Poly Haven (Clay Roof Tiles 02) · color + normal + rugosidad',
   },
 ];
 
@@ -116,7 +130,7 @@ export async function listUserTextures(): Promise<ColorMapTextureInfo[]> {
         name: r.name,
         source: 'user' as const,
         url: userUrlFor(r),
-        license: 'Imagen propia',
+        license: 'Imagen propia (solo color)',
       }));
   } catch (err) {
     console.warn('No se pudieron leer las texturas del usuario:', err);
@@ -156,7 +170,7 @@ export async function addUserTexture(file: File): Promise<ColorMapTextureInfo> {
     name: displayName,
     source: 'user',
     url: userUrlFor(record),
-    license: 'Imagen propia',
+    license: 'Imagen propia (solo color)',
   };
 }
 
@@ -181,8 +195,14 @@ export async function listAllColorMapTextures(): Promise<ColorMapTextureInfo[]> 
 // ---------------------------------------------------------------------------
 // Caché de imágenes y texturas de three.js
 // ---------------------------------------------------------------------------
-const loadedImages = new Map<string, HTMLImageElement>();
-const threeTextureCache = new Map<string, THREE.Texture>();
+interface LoadedImageSet {
+  color: HTMLImageElement;
+  normal: HTMLImageElement | null;
+  roughness: HTMLImageElement | null;
+}
+
+const loadedImages = new Map<string, LoadedImageSet>();
+const threeSetCache = new Map<string, ColorMapSet>();
 
 function loadImage(url: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -194,8 +214,9 @@ function loadImage(url: string): Promise<HTMLImageElement> {
 }
 
 /**
- * Carga en memoria todas las texturas disponibles. Se llama antes de ejecutar un script
- * para que el motor pueda resolver `mat.color_map = "..."` de forma síncrona.
+ * Carga en memoria todas las texturas disponibles (color, normal y rugosidad).
+ * Se llama antes de ejecutar un script para que el motor pueda resolver
+ * `mat.color_map = "..."` de forma síncrona.
  */
 export async function preloadColorMapImages(): Promise<void> {
   const all = await listAllColorMapTextures();
@@ -203,7 +224,12 @@ export async function preloadColorMapImages(): Promise<void> {
     all.map(async (info) => {
       if (loadedImages.has(info.id)) return;
       try {
-        loadedImages.set(info.id, await loadImage(info.url));
+        const color = await loadImage(info.url);
+        const [normal, roughness] = await Promise.all([
+          info.normalUrl ? loadImage(info.normalUrl).catch(() => null) : Promise.resolve(null),
+          info.roughnessUrl ? loadImage(info.roughnessUrl).catch(() => null) : Promise.resolve(null),
+        ]);
+        loadedImages.set(info.id, { color, normal, roughness });
       } catch (err) {
         console.warn(err);
       }
@@ -211,34 +237,48 @@ export async function preloadColorMapImages(): Promise<void> {
   );
 }
 
-/** Devuelve la imagen ya cargada para un id, o null si no existe o no se ha precargado. */
-export function getLoadedColorMapImage(id: string): HTMLImageElement | null {
-  return loadedImages.get(id) ?? null;
-}
-
-/** Textura de three.js (sRGB, repetible) compartida para un id ya cargado. */
-export function getColorMapThreeTexture(id: string): THREE.Texture | null {
-  const cached = threeTextureCache.get(id);
+/** Conjunto de texturas three.js (color sRGB; normal y rugosidad en lineal) para un id ya cargado. */
+export function getColorMapSet(id: string): ColorMapSet | null {
+  const cached = threeSetCache.get(id);
   if (cached) return cached;
-  const img = loadedImages.get(id);
-  if (!img) return null;
-  const tex = new THREE.Texture(img);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.wrapS = THREE.RepeatWrapping;
-  tex.wrapT = THREE.RepeatWrapping;
-  tex.anisotropy = 4;
-  tex.needsUpdate = true;
-  threeTextureCache.set(id, tex);
-  return tex;
+  const imgs = loadedImages.get(id);
+  if (!imgs) return null;
+
+  const make = (img: HTMLImageElement, srgb: boolean): THREE.Texture => {
+    const tex = new THREE.Texture(img);
+    tex.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    tex.anisotropy = 8;
+    // Las fuentes son JPG: el exportador GLB las codifica como JPEG en vez de PNG (mucho más ligero)
+    tex.userData.mimeType = 'image/jpeg';
+    tex.needsUpdate = true;
+    return tex;
+  };
+
+  const set: ColorMapSet = {
+    color: make(imgs.color, true),
+    normal: imgs.normal ? make(imgs.normal, false) : null,
+    roughness: imgs.roughness ? make(imgs.roughness, false) : null,
+  };
+  threeSetCache.set(id, set);
+  return set;
 }
 
-/** Forzar la recarga de una textura (p. ej. tras borrar una subida). */
+/** Textura de color de three.js para un id ya cargado (compatibilidad). */
+export function getColorMapThreeTexture(id: string): THREE.Texture | null {
+  return getColorMapSet(id)?.color ?? null;
+}
+
+/** Olvida una textura (p. ej. tras borrar una subida) para que se recargue la próxima vez. */
 export function forgetColorMapTexture(id: string): void {
   loadedImages.delete(id);
-  const tex = threeTextureCache.get(id);
-  if (tex) {
-    tex.dispose();
-    threeTextureCache.delete(id);
+  const set = threeSetCache.get(id);
+  if (set) {
+    set.color.dispose();
+    set.normal?.dispose();
+    set.roughness?.dispose();
+    threeSetCache.delete(id);
   }
 }
 

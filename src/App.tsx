@@ -150,8 +150,10 @@ import PythonScriptModal, {
 import MyTexturesPanel from './components/MyTexturesPanel';
 import {
   ColorMapTextureInfo,
+  ColorMapSet,
   applyBoxProjectedUv,
-  getColorMapThreeTexture,
+  getColorMapSet,
+  listAllColorMapTextures,
   preloadColorMapImages,
 } from './utils/textureLibrary';
 import {
@@ -272,7 +274,7 @@ export default function App() {
   const [activeTexture, setActiveTexture] = useState<TexturePatternType>('none');
   // "Mis texturas": imagen aplicada como mapa de color al modelo actual (tiene prioridad sobre la procedural)
   const [userColorTextureInfo, setUserColorTextureInfo] = useState<ColorMapTextureInfo | null>(null);
-  const [userColorTexture, setUserColorTexture] = useState<THREE.Texture | null>(null);
+  const [userColorMaps, setUserColorMaps] = useState<ColorMapSet | null>(null);
   const [userColorTileMeters, setUserColorTileMeters] = useState<number>(3);
   const [textureCategoryFilter, setTextureCategoryFilter] = useState<'all' | TextureCategoryType>('all');
   const [textureRepeatScale, setTextureRepeatScale] = useState<number>(2);
@@ -657,11 +659,18 @@ export default function App() {
         const origHex = (mesh.userData.originalColorHex as string) || '#e11d48';
         const hasPerMeshTex = Boolean(mesh.userData.hasPerMeshTexture && mesh.userData.originalMap);
         const targetColor =
-          (!isNone && textureUseNaturalColor) || (isNone && hasPerMeshTex) || Boolean(userColorTexture)
+          (!isNone && textureUseNaturalColor) || (isNone && hasPerMeshTex) || Boolean(userColorMaps)
             ? new THREE.Color('#ffffff')
             : new THREE.Color(origHex);
         const mapToUse =
-          userColorTexture ?? (isNone ? mesh.userData.originalMap || null : colorMap);
+          userColorMaps?.color ?? (isNone ? mesh.userData.originalMap || null : colorMap);
+        // Normal y rugosidad: los del mapa de usuario, o los que dejó el script en la malla
+        const normalToUse = userColorMaps
+          ? userColorMaps.normal
+          : ((mesh.userData.originalNormalMap as THREE.Texture | null | undefined) ?? null);
+        const roughMapToUse = userColorMaps
+          ? userColorMaps.roughness
+          : ((mesh.userData.originalRoughnessMap as THREE.Texture | null | undefined) ?? null);
         const bumpMapToUse = isNone ? mesh.userData.originalBumpMap || null : bumpMap;
         const bumpScaleToUse = isNone
           ? (mesh.userData.originalBumpScale as number | undefined) ?? 0
@@ -684,6 +693,7 @@ export default function App() {
         if (toonMat) {
           toonMat.color.copy(targetColor);
           toonMat.map = mapToUse;
+          toonMat.normalMap = normalToUse;
           toonMat.bumpMap = bumpMapToUse;
           toonMat.bumpScale = bumpScaleToUse;
           toonMat.needsUpdate = true;
@@ -693,9 +703,11 @@ export default function App() {
         if (eeveeMat) {
           eeveeMat.color.copy(targetColor);
           eeveeMat.map = mapToUse;
+          eeveeMat.normalMap = normalToUse;
+          eeveeMat.roughnessMap = roughMapToUse;
           eeveeMat.bumpMap = bumpMapToUse;
           eeveeMat.bumpScale = bumpScaleToUse;
-          eeveeMat.roughness = THREE.MathUtils.clamp(activeRough * 0.92, 0.03, 1.0);
+          eeveeMat.roughness = roughMapToUse ? 1 : THREE.MathUtils.clamp(activeRough * 0.92, 0.03, 1.0);
           eeveeMat.metalness = activeMetal;
           eeveeMat.clearcoat = activeClearcoat;
           eeveeMat.ior = activeIor;
@@ -709,9 +721,11 @@ export default function App() {
         if (cyclesMat) {
           cyclesMat.color.copy(targetColor);
           cyclesMat.map = mapToUse;
+          cyclesMat.normalMap = normalToUse;
+          cyclesMat.roughnessMap = roughMapToUse;
           cyclesMat.bumpMap = bumpMapToUse;
           cyclesMat.bumpScale = bumpScaleToUse * 1.15;
-          cyclesMat.roughness = THREE.MathUtils.clamp(
+          cyclesMat.roughness = roughMapToUse ? 1 : THREE.MathUtils.clamp(
             activeRough * settingsRef.current.cyclesRoughnessFactor,
             0.02,
             1.0
@@ -735,9 +749,11 @@ export default function App() {
         if (stdMat && 'map' in stdMat) {
           stdMat.color.copy(targetColor);
           stdMat.map = mapToUse;
+          stdMat.normalMap = normalToUse;
+          stdMat.roughnessMap = roughMapToUse;
           stdMat.bumpMap = bumpMapToUse;
           stdMat.bumpScale = bumpScaleToUse;
-          stdMat.roughness = activeRough;
+          stdMat.roughness = roughMapToUse ? 1 : activeRough;
           stdMat.metalness = activeMetal;
           stdMat.needsUpdate = true;
         }
@@ -745,7 +761,7 @@ export default function App() {
     });
 
     refs.resetCyclesAccumulation?.();
-  }, [activeTexture, textureRepeatScale, textureBumpIntensity, textureUseNaturalColor, userColorTexture]);
+  }, [activeTexture, textureRepeatScale, textureBumpIntensity, textureUseNaturalColor, userColorMaps, modelStats]);
 
   // Mapa propio de "Mis texturas": proyecta las UV por caja en metros y restaura las originales al quitarlo
   useEffect(() => {
@@ -758,7 +774,7 @@ export default function App() {
       if ((mesh.material as THREE.Material)?.type === 'ShaderMaterial') return;
       const geo = mesh.geometry as THREE.BufferGeometry;
 
-      if (userColorTexture) {
+      if (userColorMaps) {
         if (!('preMyColorUv' in mesh.userData)) {
           const uvAttr = geo.getAttribute('uv') as THREE.BufferAttribute | undefined;
           mesh.userData.preMyColorUv = uvAttr ? uvAttr.clone() : null;
@@ -774,7 +790,7 @@ export default function App() {
     });
 
     refs.resetCyclesAccumulation?.();
-  }, [userColorTexture, userColorTileMeters]);
+  }, [userColorMaps, userColorTileMeters, modelStats]);
 
   // Actualizar tamaño y color visual de los cursores 3D del pincel (Principal + Espejo X)
   useEffect(() => {
@@ -2399,19 +2415,54 @@ export default function App() {
   const handleApplyUserTexture = async (info: ColorMapTextureInfo | null) => {
     if (!info) {
       setUserColorTextureInfo(null);
-      setUserColorTexture(null);
+      setUserColorMaps(null);
       return;
     }
     await preloadColorMapImages();
-    const tex = getColorMapThreeTexture(info.id);
-    if (!tex) {
+    const set = getColorMapSet(info.id);
+    if (!set) {
       setCloudFeedback({ type: 'error', text: `No se pudo cargar la textura "${info.name}"` });
       setTimeout(() => setCloudFeedback(null), 5000);
       return;
     }
     setUserColorTextureInfo(info);
-    setUserColorTexture(tex);
+    setUserColorMaps(set);
   };
+
+  // Persistencia de "Mis texturas": la textura aplicada y los metros por repetición se recuerdan
+  // entre sesiones y se reaplican al cargar el modelo (y tras cada script).
+  const MIS_TEXTURAS_KEY = 'salon3d.misTexturas.v1';
+  useEffect(() => {
+    const stored: { appliedId?: string | null; tileMeters?: number } | null = (() => {
+      try {
+        const raw = window.localStorage.getItem(MIS_TEXTURAS_KEY);
+        return raw ? (JSON.parse(raw) as { appliedId?: string | null; tileMeters?: number }) : null;
+      } catch {
+        return null;
+      }
+    })();
+    if (stored?.tileMeters && Number.isFinite(stored.tileMeters)) {
+      setUserColorTileMeters(Math.min(50, Math.max(0.5, stored.tileMeters)));
+    }
+    if (stored?.appliedId) {
+      listAllColorMapTextures().then((all) => {
+        const info = all.find((t) => t.id === stored?.appliedId);
+        if (info) void handleApplyUserTexture(info);
+      });
+    }
+    // Solo al montar: restaura la selección guardada
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        MIS_TEXTURAS_KEY,
+        JSON.stringify({ appliedId: userColorTextureInfo?.id ?? null, tileMeters: userColorTileMeters })
+      );
+    } catch {
+      /* almacenamiento no disponible: la selección simplemente no se guarda */
+    }
+  }, [userColorTextureInfo, userColorTileMeters]);
 
   // Exportar el modelo modificado a archivo .GLB binario (con modo Ligero, Ultra-Ligero o Estándar)
   const handleExportGlb = async (overrideMode?: GlbExportPresetMode) => {
@@ -2595,6 +2646,9 @@ export default function App() {
         setModelStats((prev) => ({ ...prev, name: `${customModelLabel} (Python bpy)` }));
       } else if (code.includes('bpy.ops.object.delete()')) {
         setModelStats((prev) => ({ ...prev, name: 'Objeto_Procedural_Python.glb' }));
+      } else {
+        // Sin etiqueta, no dejar el nombre del modelo anterior (p. ej. "Golem...") en el resultado
+        setModelStats((prev) => ({ ...prev, name: 'Modelo_Python (Python bpy)' }));
       }
       // Guardar copia maestra intacta del nuevo dibujo generado para poder restaurarlo siempre
       saveMasterDrawingCheckpoint(refs.currentModelWrapper);
@@ -5162,6 +5216,7 @@ export default function App() {
                   </div>
                   <div className="grid grid-cols-2 gap-1.5">
                     {[
+                      { id: 'gen_ayuntamiento_moguer', shortLabel: '🏛️ Ayuntamiento Moguer' },
                       { id: 'gen_game_treasure_chest', shortLabel: '📦 Cofre Tesoro' },
                       { id: 'gen_game_stylized_tree', shortLabel: '🌲 Árbol & Isla' },
                       { id: 'gen_game_cyber_vehicle', shortLabel: '🚀 Vehículo Sci-Fi' },

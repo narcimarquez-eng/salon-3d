@@ -207,6 +207,8 @@ export const GEMINI_TRAINING_TAGS: GeminiTrainingTagItem[] = [
   { tag: '#TexPiedraSilleria', point: 'P3', codeHint: 'mat.texture = "stone_ashlar" # Sillería caliza con relieve' },
   { tag: '#TexTravertinoRomano', point: 'P3', codeHint: 'mat.texture = "travertine_roman" # Travertino poroso' },
   { tag: '#TexMarmolCarrara', point: 'P3', codeHint: 'mat.texture = "marble_carrara" # Mármol blanco veteado' },
+  { tag: '#TexCalBlanca', point: 'P3', codeHint: 'mat.color_map = "cal_blanca"; mat.color_map_scale = 2.0 # Cal blanca CC0 (color+normal+rugosidad)' },
+  { tag: '#TexTejaArcilla', point: 'P3', codeHint: 'mat.color_map = "teja_arcilla"; mat.color_map_scale = 2.5 # Teja árabe de arcilla CC0' },
   { tag: '#TexMarmolNegroOro', point: 'P3', codeHint: 'mat.texture = "marble_nero" # Mármol negro Marquina y oro' },
   { tag: '#TexAdoquinPiedra', point: 'P3', codeHint: 'mat.texture = "cobblestone" # Adoquín empedrado' },
   { tag: '#TexLadrilloMudejar', point: 'P3', codeHint: 'mat.texture = "brick_mudejar" # Ladrillo visto mudéjar' },
