@@ -3812,6 +3812,7 @@ export async function executeBlenderPythonScript(
     _flipNormals: boolean;
     _customGradientMap: THREE.DataTexture | null;
     _texturePattern: TexturePatternType;
+    _textureExplicit?: boolean;
     _textureRepeat: number;
     _textureNaturalColor: boolean;
     _linkedMeshes: Set<THREE.Mesh>;
@@ -3888,6 +3889,8 @@ export async function executeBlenderPythonScript(
     return { tex, mainColor: brightestColor };
   };
 
+  // Materiales cuya textura salió del nombre: se avisa al final si el script no la fijó explícitamente
+  const inferredMaterials: Array<{ name: string; tex: string; obj: { _texturePattern: string; _textureExplicit?: boolean } }> = [];
   const createBlenderMaterial = (matName: string = 'Material'): BlenderMaterialInstance => {
     // Inferencia automática de textura procedural si el nombre del material indica piedra, madera, mármol, ladrillo, agua, etc.
     const inferredTex = resolveTexturePatternId(matName);
@@ -4246,6 +4249,9 @@ export async function executeBlenderPythonScript(
       },
     });
 
+    if (inferredTex !== 'none') {
+      inferredMaterials.push({ name: matName, tex: inferredTex, obj: matObj });
+    }
     return new Proxy(matObj, {
       set(target, prop, value) {
         if (prop === 'diffuse_color') {
@@ -4279,6 +4285,7 @@ export async function executeBlenderPythonScript(
         }
         if (prop === 'texture' || prop === 'pattern' || prop === 'textura') {
           target._texturePattern = resolveTexturePatternId(String(value));
+          target._textureExplicit = true;
           target._sync();
           return true;
         }
@@ -8667,10 +8674,17 @@ export async function executeBlenderPythonScript(
       }
 
       // Bucle `for` con soporte de desempaquetado de tuplas e iterables implícitos: `for s in -1, 1:`
-      const forMatch = trimmed.match(/^for\s+(.+?)\s+in\s+(.+):$/);
+      // El espacio tras `in` es opcional: un paso previo puede dejar `in[-1, 1]` al convertir tuplas
+      const forMatch = trimmed.match(/^for\s+(.+?)\s+in\s*(.+):$/);
       if (forMatch) {
         const rawTarget = forMatch[1].trim();
-        let iterExpr = rewritePythonSyntaxInLine(forMatch[2].trim(), true);
+        // `for x in (a, b):` es una tupla de Python: se trata como lista (en JS, `(a, b)` es un operador coma)
+        let iterSource = forMatch[2].trim();
+        const wrappedTuple = iterSource.match(/^\((.*)\)$/);
+        if (wrappedTuple && splitTopLevelCommas(wrappedTuple[1]).length > 1) {
+          iterSource = `[${wrappedTuple[1]}]`;
+        }
+        let iterExpr = rewritePythonSyntaxInLine(iterSource, true);
         if (splitTopLevelCommas(iterExpr).length > 1) {
           iterExpr = `[${iterExpr}]`;
         }
@@ -9099,6 +9113,16 @@ export async function executeBlenderPythonScript(
     }
 
     applyNormalSmoothingToModel(modelWrapper, normSmooth);
+
+    // Aviso visible: textura asignada por el nombre del material y no cambiada por el script
+    const noticeNames = new Set<string>();
+    for (const entry of inferredMaterials) {
+      if (entry.obj._textureExplicit || entry.obj._texturePattern !== entry.tex || noticeNames.has(entry.name)) continue;
+      noticeNames.add(entry.name);
+      logs.push(
+        `Aviso: el material '${entry.name}' recibe la textura '${entry.tex}' por su nombre. Para quitarla usa mat.texture = "none".`
+      );
+    }
 
     const execTime = Math.round(performance.now() - startTime);
     logs.push(

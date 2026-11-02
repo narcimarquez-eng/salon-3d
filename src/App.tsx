@@ -2568,6 +2568,13 @@ export default function App() {
       coordinateMode: effectiveCoordMode,
     });
 
+    // Avisos del motor (p. ej. textura asignada por el nombre del material): visibles aunque el modal se cierre
+    const engineNotices = result.logs.filter((line) => line.startsWith('Aviso:'));
+    if (engineNotices.length > 0) {
+      setCloudFeedback({ type: 'error', text: engineNotices.join(' · ') });
+      setTimeout(() => setCloudFeedback(null), 9000);
+    }
+
     // Sincronizar el modo de sombreado activo (Cel, EEVEE, Cycles, MatCap, Normales, Original) y Wireframe en las nuevas mallas
     const matcapTex = getProceduralMatcapTexture(settingsRef.current.matcapPreset);
     refs.currentModelWrapper.traverse((child) => {
@@ -2653,7 +2660,8 @@ export default function App() {
       // Guardar copia maestra intacta del nuevo dibujo generado para poder restaurarlo siempre
       saveMasterDrawingCheckpoint(refs.currentModelWrapper);
       setDecimateFeedback(null);
-      refs.setCameraViewPreset('hero');
+      // Encuadrar todo el modelo tras el script (como "Centrar"), no con la vista "hero" que acerca demasiado
+      refs.frameModel(1.25);
     }
 
     refs.recalculateStats();
