@@ -2538,6 +2538,8 @@ export default function App() {
     pushUndoSnapshot(refs.currentModelWrapper);
     let activeShadingMode: ShadingModeType = settingsRef.current.shadingMode;
     const result = await executeBlenderPythonScript(code, refs.currentModelWrapper, {
+      // Texturas por nombre solo para las plantillas integradas (aspecto conservado); el código pegado o generado no las usa
+      inferTexturesFromNames: BLENDER_SCRIPT_PRESETS.some((preset) => preset.code.trim() === code.trim()),
       onTextureChange: (tex) => setActiveTexture(tex),
       onTextureSettingsChange: (opts) => {
         if (opts.repeatScale !== undefined) setTextureRepeatScale(opts.repeatScale);
@@ -2567,13 +2569,6 @@ export default function App() {
       normalSmoothing: settingsRef.current.normalSmoothing,
       coordinateMode: effectiveCoordMode,
     });
-
-    // Avisos del motor (p. ej. textura asignada por el nombre del material): visibles aunque el modal se cierre
-    const engineNotices = result.logs.filter((line) => line.startsWith('Aviso:'));
-    if (engineNotices.length > 0) {
-      setCloudFeedback({ type: 'error', text: engineNotices.join(' · ') });
-      setTimeout(() => setCloudFeedback(null), 9000);
-    }
 
     // Sincronizar el modo de sombreado activo (Cel, EEVEE, Cycles, MatCap, Normales, Original) y Wireframe en las nuevas mallas
     const matcapTex = getProceduralMatcapTexture(settingsRef.current.matcapPreset);

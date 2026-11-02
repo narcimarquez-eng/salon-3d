@@ -3500,6 +3500,8 @@ export async function executeBlenderPythonScript(
   script: string,
   modelWrapper: THREE.Object3D,
   callbacks?: {
+    /** Solo para plantillas integradas: asignar textura procedural según el nombre del material (comportamiento heredado) */
+    inferTexturesFromNames?: boolean;
     onTextureChange?: (texName: TexturePatternType) => void;
     onTextureSettingsChange?: (opts: {
       activeTexture?: TexturePatternType;
@@ -3812,7 +3814,6 @@ export async function executeBlenderPythonScript(
     _flipNormals: boolean;
     _customGradientMap: THREE.DataTexture | null;
     _texturePattern: TexturePatternType;
-    _textureExplicit?: boolean;
     _textureRepeat: number;
     _textureNaturalColor: boolean;
     _linkedMeshes: Set<THREE.Mesh>;
@@ -3889,11 +3890,12 @@ export async function executeBlenderPythonScript(
     return { tex, mainColor: brightestColor };
   };
 
-  // Materiales cuya textura salió del nombre: se avisa al final si el script no la fijó explícitamente
-  const inferredMaterials: Array<{ name: string; tex: string; obj: { _texturePattern: string; _textureExplicit?: boolean } }> = [];
   const createBlenderMaterial = (matName: string = 'Material'): BlenderMaterialInstance => {
     // Inferencia automática de textura procedural si el nombre del material indica piedra, madera, mármol, ladrillo, agua, etc.
-    const inferredTex = resolveTexturePatternId(matName);
+    // Como en Blender, el nombre del material no asigna textura: solo `mat.texture = "..."` o los presets integrados
+    const inferredTex: TexturePatternType = callbacks?.inferTexturesFromNames
+      ? resolveTexturePatternId(matName)
+      : 'none';
     const presetBump = inferredTex !== 'none' ? getTexturePresetInfo(inferredTex).pbr.bumpScale : 0.035;
 
     const matObj: BlenderMaterialInstance = {
@@ -4249,9 +4251,6 @@ export async function executeBlenderPythonScript(
       },
     });
 
-    if (inferredTex !== 'none') {
-      inferredMaterials.push({ name: matName, tex: inferredTex, obj: matObj });
-    }
     return new Proxy(matObj, {
       set(target, prop, value) {
         if (prop === 'diffuse_color') {
@@ -4285,7 +4284,6 @@ export async function executeBlenderPythonScript(
         }
         if (prop === 'texture' || prop === 'pattern' || prop === 'textura') {
           target._texturePattern = resolveTexturePatternId(String(value));
-          target._textureExplicit = true;
           target._sync();
           return true;
         }
@@ -9113,16 +9111,6 @@ export async function executeBlenderPythonScript(
     }
 
     applyNormalSmoothingToModel(modelWrapper, normSmooth);
-
-    // Aviso visible: textura asignada por el nombre del material y no cambiada por el script
-    const noticeNames = new Set<string>();
-    for (const entry of inferredMaterials) {
-      if (entry.obj._textureExplicit || entry.obj._texturePattern !== entry.tex || noticeNames.has(entry.name)) continue;
-      noticeNames.add(entry.name);
-      logs.push(
-        `Aviso: el material '${entry.name}' recibe la textura '${entry.tex}' por su nombre. Para quitarla usa mat.texture = "none".`
-      );
-    }
 
     const execTime = Math.round(performance.now() - startTime);
     logs.push(
