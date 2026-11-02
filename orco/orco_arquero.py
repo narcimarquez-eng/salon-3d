@@ -62,9 +62,11 @@ def esfera(nombre, centro, radio, mat, escala=(1.0, 1.0, 1.0)):
 # ==========================================
 # 1. MATERIALES (texturas procedurales asignadas explícitamente)
 # ==========================================
-m_piel = material("Arq_Piel_Verde", (0.20, 0.30, 0.17, 1.0), 0.65)
-m_piel_sombra = material("Arq_Piel_Sombra", (0.12, 0.19, 0.10, 1.0), 0.7)
-m_cuero = material("Arq_Cuero_Marron", (0.20, 0.11, 0.05, 1.0), 0.6)
+m_piel = material("Arq_Piel_Verde", (0.13, 0.22, 0.12, 1.0), 0.6)
+m_piel_sombra = material("Arq_Piel_Sombra", (0.08, 0.14, 0.07, 1.0), 0.65)
+m_cuero = material("Arq_Cuero_Marron", (0.30, 0.18, 0.09, 1.0), 0.55)
+m_cuero.natural_color = True
+m_cuero.texture = "leather_tufted"
 m_tela = material("Arq_Taparrabos_Tela", (0.78, 0.72, 0.58, 1.0), 0.9)
 m_tela.natural_color = True
 m_tela.texture = "woven_linen"
@@ -85,7 +87,12 @@ m_pluma = material("Arq_Pluma", (0.80, 0.75, 0.62, 1.0), 0.9)
 # 2. PIERNAS, BOTAS Y PROTECTORES
 # ==========================================
 for sx in [-1, 1]:
-    esfera("Arq_Pie_" + str(sx), (sx * 0.22, -0.08, 0.13), 0.14, m_cuero, escala=(1.0, 1.7, 0.7))
+    caja("Arq_Bota_Cuerpo_" + str(sx), (sx * 0.22, -0.06, 0.13), (0.24, 0.36, 0.2), m_cuero)
+    esfera("Arq_Bota_Puntera_" + str(sx), (sx * 0.22, -0.23, 0.11), 0.13, m_cuero, escala=(1.0, 0.9, 0.75))
+    caja("Arq_Suela_" + str(sx), (sx * 0.22, -0.07, 0.03), (0.26, 0.4, 0.04), m_cuero)
+    caja("Arq_Talon_" + str(sx), (sx * 0.22, 0.1, 0.1), (0.24, 0.1, 0.16), m_cuero)
+    for k in range(3):
+        caja("Arq_Tira_" + str(sx) + "_" + str(k), (sx * 0.22, -0.12 + k * 0.07, 0.2 + k * 0.012), (0.27, 0.025, 0.03), m_cuero, rot=(0.2, 0, 0))
     esfera("Arq_Pantorrilla_" + str(sx), (sx * 0.22, 0.02, 0.62), 0.2, m_piel, escala=(0.85, 0.9, 1.6))
     cilindro("Arq_Protector_" + str(sx), (sx * 0.22, -0.02, 0.44), 0.165, 0.3, m_acero, vertices=12)
     esfera("Arq_Muslo_" + str(sx), (sx * 0.26, 0.0, 1.2), 0.24, m_piel, escala=(0.95, 0.95, 1.5))
@@ -127,7 +134,11 @@ for sx in [-1, 1]:
     esfera("Arq_Biceps_" + str(sx), (sx * 0.6, -0.08, 2.14), 0.19, m_piel, escala=(1.0, 0.9, 1.1))
     esfera("Arq_Antebrazo_" + str(sx), (sx * 0.64, -0.1, 1.72), 0.19, m_piel_sombra, escala=(1.0, 1.0, 1.4))
     caja("Arq_Brazal_" + str(sx), (sx * 0.62, -0.12, 1.72), (0.32, 0.32, 0.22), m_cuero)
-    esfera("Arq_Puño_" + str(sx), (sx * 0.67, -0.24, 1.38), 0.155, m_piel, escala=(1.0, 0.95, 1.0))
+    caja("Arq_Palma_" + str(sx), (sx * 0.66, -0.25, 1.43), (0.14, 0.12, 0.16), m_piel)
+    for k in range(4):
+        cilindro("Arq_Dedo_" + str(sx) + "_" + str(k), (sx * 0.66 + (k - 1.5) * 0.034, -0.345, 1.34), 0.02, 0.1, m_piel, vertices=6, rot=(0.5, 0, 0))
+        esfera("Arq_Nudillo_" + str(sx) + "_" + str(k), (sx * 0.66 + (k - 1.5) * 0.034, -0.31, 1.39), 0.026, m_piel_sombra)
+    cilindro("Arq_Pulgar_" + str(sx), (sx * 0.73, -0.28, 1.48), 0.024, 0.09, m_piel, vertices=6, rot=(0.4, 0, sx * 0.6))
 
 # ==========================================
 # 6. CUELLO, CABEZA Y RASGOS
