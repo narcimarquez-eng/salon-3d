@@ -659,7 +659,9 @@ export default function App() {
         const origHex = (mesh.userData.originalColorHex as string) || '#e11d48';
         const hasPerMeshTex = Boolean(mesh.userData.hasPerMeshTexture && mesh.userData.originalMap);
         const targetColor =
-          (!isNone && textureUseNaturalColor) || (isNone && hasPerMeshTex) || Boolean(userColorMaps)
+          (!isNone && textureUseNaturalColor) ||
+          (isNone && hasPerMeshTex && mesh.userData.perMeshMapHasColor !== false) ||
+          Boolean(userColorMaps)
             ? new THREE.Color('#ffffff')
             : new THREE.Color(origHex);
         const mapToUse =

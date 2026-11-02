@@ -1701,6 +1701,9 @@ function applyMaterialToThreeMesh(
     mesh.userData.originalRoughnessMap = null;
   }
   mesh.userData.imageMapApplied = Boolean(imageColorMap);
+  // ¿El mapa por malla ya trae su propio color? (imagen o patrón con color natural). Si no, la app debe
+  // conservar el color base del material para teñir el patrón, como hace Blender.
+  mesh.userData.perMeshMapHasColor = Boolean(imageColorMap) || Boolean(texPattern && useNatColor);
 
   const resolvedRough =
     texPreset && roughness === 0.38 ? texPreset.pbr.roughness : roughness;

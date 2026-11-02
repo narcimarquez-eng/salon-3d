@@ -15,6 +15,12 @@ import math
 bpy.ops.object.select_all(action='SELECT')
 bpy.ops.object.delete(use_global=False)
 
+# Render con volumen y luz realistas (EEVEE) en lugar del Cel-Shading por defecto.
+# Luz más suave y menos reflejo de entorno: con los valores por defecto la piel sale sobreexpuesta.
+bpy.ops.render.set_engine(engine='BLENDER_EEVEE_NEXT', env_intensity=0.4, bloom=0.05)
+bpy.ops.render.set_lighting(intensity=1.0, angle=40)
+bpy.ops.render.set_ssao(intensity=1.4)
+
 def material(nombre, color, rugosidad=0.7, metalico=0.0):
     mat = bpy.data.materials.new(name=nombre)
     mat.use_nodes = True
@@ -52,8 +58,8 @@ def cono(nombre, centro, r1, r2, alto, mat, vertices=8, rot=(0, 0, 0)):
     obj.name = nombre
     return asignar_mat(obj, mat)
 
-def esfera(nombre, centro, radio, mat, escala=(1.0, 1.0, 1.0)):
-    bpy.ops.mesh.primitive_uv_sphere_add(segments=14, ring_count=9, radius=radio, location=centro)
+def esfera(nombre, centro, radio, mat, escala=(1.0, 1.0, 1.0), rot=(0, 0, 0)):
+    bpy.ops.mesh.primitive_uv_sphere_add(segments=14, ring_count=9, radius=radio, location=centro, rotation=rot)
     obj = bpy.context.active_object
     obj.name = nombre
     obj.scale = escala
@@ -62,20 +68,18 @@ def esfera(nombre, centro, radio, mat, escala=(1.0, 1.0, 1.0)):
 # ==========================================
 # 1. MATERIALES (texturas procedurales asignadas explícitamente)
 # ==========================================
-m_piel = material("Arq_Piel_Verde", (0.13, 0.22, 0.12, 1.0), 0.6)
-m_piel_sombra = material("Arq_Piel_Sombra", (0.08, 0.14, 0.07, 1.0), 0.65)
-m_cuero = material("Arq_Cuero_Marron", (0.30, 0.18, 0.09, 1.0), 0.55)
-m_cuero.natural_color = True
-m_cuero.texture = "leather_tufted"
-m_tela = material("Arq_Taparrabos_Tela", (0.78, 0.72, 0.58, 1.0), 0.9)
-m_tela.natural_color = True
+m_piel = material("Arq_Piel_Verde", (0.14, 0.19, 0.13, 1.0), 0.6)
+m_piel_sombra = material("Arq_Piel_Sombra", (0.085, 0.12, 0.08, 1.0), 0.65)
+m_cuero = material("Arq_Cuero_Marron", (0.16, 0.09, 0.04, 1.0), 0.5)
+m_tela = material("Arq_Taparrabos_Tela", (0.62, 0.55, 0.42, 1.0), 0.9)
 m_tela.texture = "woven_linen"
 m_acero = material("Arq_Acero_Protector", (0.55, 0.57, 0.60, 1.0), 0.35, 0.9)
 m_acero.natural_color = True
 m_acero.texture = "brushed_metal"
-m_pelo = material("Arq_Pelo_Castano", (0.30, 0.19, 0.10, 1.0), 0.9)
+m_pelo = material("Arq_Pelo_Castano", (0.14, 0.08, 0.04, 1.0), 0.85)
 m_diente = material("Arq_Colmillo", (0.88, 0.84, 0.70, 1.0), 0.4)
-m_ojo = material("Arq_Ojo", (0.20, 0.12, 0.05, 1.0), 0.3)
+m_ojo = material("Arq_Ojo", (0.04, 0.03, 0.02, 1.0), 0.3)
+m_iris = material("Arq_Iris", (0.45, 0.30, 0.06, 1.0), 0.3)
 m_madera = material("Arq_Madera_Arco", (0.40, 0.26, 0.13, 1.0), 0.7)
 m_madera.natural_color = True
 m_madera.texture = "wood_oak"
@@ -102,7 +106,12 @@ for sx in [-1, 1]:
 # 3. CADERA, TAPARRABOS Y CINTURÓN
 # ==========================================
 esfera("Arq_Cadera", (0, 0, 1.55), 0.36, m_piel, escala=(1.25, 0.9, 0.8))
-caja("Arq_Taparrabos", (0, -0.26, 1.4), (0.4, 0.08, 0.46), m_tela)
+caja("Arq_Taparrabos", (0, -0.27, 1.42), (0.36, 0.05, 0.5), m_tela, rot=(0.12, 0, 0))
+caja("Arq_Taparrabos_Trasero", (0, 0.27, 1.42), (0.42, 0.05, 0.48), m_tela, rot=(-0.12, 0, 0))
+for sx in [-1, 1]:
+    caja("Arq_Faldon_Lateral_" + str(sx), (sx * 0.36, -0.1, 1.5), (0.05, 0.22, 0.3), m_tela, rot=(0, sx * 0.25, 0))
+caja("Arq_Bolsa", (-0.3, -0.24, 1.6), (0.16, 0.08, 0.18), m_cuero)
+cilindro("Arq_Bolsa_Cierre", (-0.3, -0.29, 1.66), 0.02, 0.03, m_acero, vertices=8, rot=(math.pi / 2, 0, 0))
 caja("Arq_Cinturon", (0, -0.04, 1.72), (0.72, 0.2, 0.12), m_cuero)
 caja("Arq_Hebilla", (0, -0.16, 1.72), (0.1, 0.04, 0.1), m_acero)
 
@@ -143,16 +152,35 @@ for sx in [-1, 1]:
 # ==========================================
 # 6. CUELLO, CABEZA Y RASGOS
 # ==========================================
-cilindro("Arq_Cuello", (0, 0, 2.72), 0.2, 0.26, m_piel_sombra, vertices=12)
-esfera("Arq_Cabeza", (0, 0, 2.98), 0.27, m_piel, escala=(1.05, 1.05, 1.12))
-esfera("Arq_Pelo", (0, 0.03, 3.2), 0.26, m_pelo, escala=(1.05, 1.0, 0.5))
-caja("Arq_Arco_Ceja", (0, -0.3, 3.08), (0.56, 0.14, 0.12), m_piel_sombra)
-esfera("Arq_Nariz", (0, -0.33, 2.96), 0.08, m_piel_sombra, escala=(0.8, 1.2, 1.3))
-caja("Arq_Mandibula", (0, -0.12, 2.8), (0.4, 0.24, 0.14), m_piel_sombra)
+cilindro("Arq_Cuello", (0, 0.02, 2.72), 0.21, 0.28, m_piel_sombra, vertices=12)
 for sx in [-1, 1]:
-    esfera("Arq_Ojo_" + str(sx), (sx * 0.1, -0.31, 3.03), 0.035, m_ojo)
-    esfera("Arq_Oreja_" + str(sx), (sx * 0.27, 0.0, 2.98), 0.09, m_piel, escala=(0.4, 0.9, 1.3))
-    cono("Arq_Colmillo_" + str(sx), (sx * 0.15, -0.31, 2.86), 0.045, 0.0, 0.16, m_diente)
+    # Trapecios que unen la nuca con los hombros
+    esfera("Arq_Trapecio_" + str(sx), (sx * 0.2, 0.06, 2.68), 0.16, m_piel, escala=(1.3, 1.0, 0.7))
+# Cráneo y masa de la cara (pómulos anchos)
+esfera("Arq_Craneo", (0, 0.03, 3.03), 0.25, m_piel)
+esfera("Arq_Cara", (0, -0.12, 2.94), 0.2, m_piel, escala=(1.25, 0.9, 0.9))
+# Ceja redondeada y muy marcada
+esfera("Arq_Ceja", (0, -0.23, 3.07), 0.12, m_piel_sombra, escala=(2.2, 0.8, 0.55))
+# Ojos hundidos bajo la ceja, con iris ámbar
+for sx in [-1, 1]:
+    esfera("Arq_Ojo_" + str(sx), (sx * 0.09, -0.265, 3.015), 0.032, m_ojo)
+    esfera("Arq_Iris_" + str(sx), (sx * 0.09, -0.29, 3.015), 0.011, m_iris)
+# Nariz ancha y chata, con orificios
+esfera("Arq_Nariz", (0, -0.32, 2.95), 0.07, m_piel, escala=(1.4, 1.0, 0.9))
+for sx in [-1, 1]:
+    esfera("Arq_Orificio_" + str(sx), (sx * 0.035, -0.37, 2.925), 0.012, m_piel_sombra)
+# Hocico, labio y mandíbula inferior saliente (prognatismo)
+esfera("Arq_Hocico", (0, -0.27, 2.87), 0.12, m_piel, escala=(1.5, 0.8, 0.6))
+esfera("Arq_Mandibula", (0, -0.24, 2.78), 0.15, m_piel_sombra, escala=(1.5, 1.0, 0.75))
+for sx in [-1, 1]:
+    # Colmillos que suben desde la mandíbula por fuera del labio
+    cono("Arq_Colmillo_" + str(sx), (sx * 0.11, -0.36, 2.87), 0.035, 0.0, 0.14, m_diente, rot=(0, sx * 0.25, 0))
+    # Orejas alargadas inclinadas hacia atrás
+    esfera("Arq_Oreja_" + str(sx), (sx * 0.3, 0.04, 3.0), 0.1, m_piel, escala=(2.0, 0.5, 0.9), rot=(0, 0, sx * 0.45))
+# Pelo castaño peinado hacia atrás y moño con cinta de cuero
+esfera("Arq_Pelo", (0, 0.06, 3.13), 0.255, m_pelo, escala=(1.02, 1.05, 0.7))
+esfera("Arq_Mono", (0, 0.2, 3.3), 0.09, m_pelo)
+cilindro("Arq_Cinta_Mono", (0, 0.17, 3.24), 0.06, 0.04, m_cuero, vertices=10)
 
 # ==========================================
 # 7. ARCO EN LA MANO DERECHA (arco curvo, cuerda)
