@@ -9,6 +9,7 @@ import math
 # - Portada central con puerta de madera, reja de forja y marco ocre
 # - Cuerpo central ("torre del reloj") con esfera, cimborrio piramidal y mástil
 # - Pilastras y molduras ocres, zócalo de piedra y cubierta de teja
+# - Cal blanca y teja de arcilla con texturas CC0 (mat.color_map)
 # - Balcones corridos con barandilla de forja en la planta alta
 # - Plaza empedrada con palmeras a ambos lados
 # Ejes: X = ancho de la fachada, Y = profundidad (la fachada mira a Y negativo),
@@ -21,7 +22,7 @@ bpy.ops.object.delete(use_global=False)
 # ==========================================
 # 1. MATERIALES PBR
 # ==========================================
-def material(nombre, color, rugosidad=0.8, metalico=0.0):
+def material(nombre, color, rugosidad=0.8, metalico=0.0, mapa=None, escala_m=3.0):
     mat = bpy.data.materials.new(name=nombre)
     mat.use_nodes = True
     bsdf = mat.node_tree.nodes.get("Principled BSDF")
@@ -30,12 +31,17 @@ def material(nombre, color, rugosidad=0.8, metalico=0.0):
         bsdf.inputs["Roughness"].default_value = rugosidad
         if "Metallic" in bsdf.inputs:
             bsdf.inputs["Metallic"].default_value = metalico
+    if mapa:
+        # Textura de imagen como mapa de color (color base blanco). escala_m = metros por repetición
+        mat.color_map = mapa
+        mat.color_map_scale = escala_m
     return mat
 
-mat_cal        = material("Cal_Blanca_Fachada", (0.94, 0.92, 0.86, 1.0), 0.85)
+# Cal y teja llevan texturas CC0 de Poly Haven (public/textures/CREDITS.md)
+mat_cal        = material("Cal_Blanca_Fachada", (0.94, 0.92, 0.86, 1.0), 0.85, mapa="cal_blanca", escala_m=2.0)
 mat_ocre       = material("Ocre_Amarillo_Molduras", (0.90, 0.70, 0.30, 1.0), 0.60)
 mat_zocalo     = material("Zocalo_Piedra_Gris", (0.58, 0.55, 0.50, 1.0), 0.90)
-mat_teja       = material("Teja_Cubierta_Terracota", (0.60, 0.30, 0.18, 1.0), 0.80)
+mat_teja       = material("Teja_Cubierta_Terracota", (0.60, 0.30, 0.18, 1.0), 0.80, mapa="teja_arcilla", escala_m=2.5)
 mat_hueco      = material("Hueco_Sombra_Interior", (0.09, 0.07, 0.06, 1.0), 0.95)
 mat_madera     = material("Madera_Puerta_Consistorial", (0.30, 0.18, 0.10, 1.0), 0.70)
 mat_forja      = material("Forja_Negra_Rejas", (0.08, 0.08, 0.09, 1.0), 0.40, 0.80)

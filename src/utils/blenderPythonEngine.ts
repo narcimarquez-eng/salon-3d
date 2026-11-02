@@ -20,6 +20,12 @@ import {
 } from './geometrySmoothing';
 import { getProceduralMatcapTexture, MatcapPresetId } from './matcapGenerator';
 import { addBlenderLoop, setBlenderWater, startBlenderRun, finalizeBlenderRun } from './blenderAnimation';
+import {
+  applyBoxProjectedUv,
+  getColorMapThreeTexture,
+  preloadColorMapImages,
+  slugifyTextureId,
+} from './textureLibrary';
 
 // PURGA DEFENSIVA INMEDIATA: NUNCA extender Object.prototype (propiedades como 'get' o 'value'
 // rompen la especificación ECMAScript de descriptores en Object.defineProperty para React y librerías).
@@ -1385,6 +1391,10 @@ function parsePythonColor(
  * Configura cualquier nueva malla creada por Python con todos los materiales del estudio.
  */
 export interface ExtendedPBRMaterialProps {
+  /** Id de una textura de imagen (incluida o "Mis texturas") usada como mapa de color */
+  colorMapId?: string | null;
+  /** Metros que ocupa una repetición de la imagen */
+  colorMapTileMeters?: number;
   metallic?: number;
   roughness?: number;
   emissionColor?: THREE.Color | null;
@@ -1629,6 +1639,32 @@ function applyMaterialToThreeMesh(
     mesh.userData.originalBumpScale = procBumpScale;
   }
 
+  // Mapa de color con imagen: tiene prioridad sobre el procedural y se proyecta en metros
+  const imageColorMap = extraPbr?.colorMapId ? getColorMapThreeTexture(extraPbr.colorMapId) : null;
+  if (extraPbr?.colorMapId && !imageColorMap) {
+    console.warn(`Textura de imagen "${extraPbr.colorMapId}" no cargada; se usa el color base.`);
+  }
+  const hadImageMap = Boolean(mesh.userData.imageMapApplied);
+  if (imageColorMap) {
+    mesh.userData.hasPerMeshTexture = true;
+    mesh.userData.originalMap = imageColorMap;
+    mesh.userData.originalBumpMap = null;
+    mesh.userData.originalBumpScale = 0;
+    mesh.updateMatrix();
+    applyBoxProjectedUv(
+      mesh.geometry as THREE.BufferGeometry,
+      mesh.matrix,
+      extraPbr?.colorMapTileMeters ?? 3
+    );
+  } else if (hadImageMap) {
+    // El script quitó el mapa de imagen: vuelve al procedural (o al color base)
+    mesh.userData.hasPerMeshTexture = Boolean(texPattern);
+    mesh.userData.originalMap = procColorMap;
+    mesh.userData.originalBumpMap = procBumpMap;
+    mesh.userData.originalBumpScale = procBumpScale;
+  }
+  mesh.userData.imageMapApplied = Boolean(imageColorMap);
+
   const resolvedRough =
     texPreset && roughness === 0.38 ? texPreset.pbr.roughness : roughness;
   const resolvedMetal =
@@ -1661,7 +1697,7 @@ function applyMaterialToThreeMesh(
 
   const stdMat = mesh.userData.originalMaterial as THREE.MeshPhysicalMaterial | undefined;
   if (stdMat) {
-    stdMat.color.copy(effectiveColor);
+    stdMat.color.copy(imageColorMap ? new THREE.Color('#ffffff') : effectiveColor);
     stdMat.metalness = Math.max(0, Math.min(1, resolvedMetal));
     stdMat.roughness = Math.max(0.03, Math.min(1, resolvedRough));
     if (resolvedClearcoat !== undefined) {
@@ -1684,8 +1720,8 @@ function applyMaterialToThreeMesh(
     stdMat.opacity = isTransparent ? Math.min(alphaVal, 1.0 - transVal * 0.55) : 1.0;
     stdMat.side = sideMode;
 
-    if (procColorMap) {
-      stdMat.map = procColorMap;
+    if (imageColorMap || procColorMap || hadImageMap) {
+      stdMat.map = imageColorMap ?? procColorMap ?? null;
     }
     if (procBumpMap) {
       stdMat.bumpMap = procBumpMap;
@@ -3487,6 +3523,8 @@ export async function executeBlenderPythonScript(
   }
 ): Promise<ScriptExecutionResult> {
   ensurePythonArrayMethods();
+  // Las imágenes de mapa de color deben estar en memoria para resolver mat.color_map de forma síncrona
+  await preloadColorMapImages();
   startBlenderRun();
 
   const startTime = performance.now();
@@ -3737,6 +3775,8 @@ export async function executeBlenderPythonScript(
     metallic: number;
     roughness: number;
     texture?: string;
+    _colorMapId: string | null;
+    _colorMapTile: number;
     _baseColor: THREE.Color;
     _emissionColor: THREE.Color | null;
     _emissionStrength: number;
@@ -3859,6 +3899,8 @@ export async function executeBlenderPythonScript(
       _texturePattern: inferredTex,
       _textureRepeat: 2,
       _textureNaturalColor: false,
+      _colorMapId: null,
+      _colorMapTile: 3,
       _linkedMeshes: new Set<THREE.Mesh>(),
       _sync() {
         const extraPbr: ExtendedPBRMaterialProps = {
@@ -3877,6 +3919,8 @@ export async function executeBlenderPythonScript(
           texturePattern: this._texturePattern,
           textureRepeat: this._textureRepeat,
           textureNaturalColor: this._textureNaturalColor,
+          colorMapId: this._colorMapId,
+          colorMapTileMeters: this._colorMapTile,
         };
         this._linkedMeshes.forEach((m) => {
           applyMaterialToThreeMesh(
@@ -4225,6 +4269,18 @@ export async function executeBlenderPythonScript(
         }
         if (prop === 'natural_color') {
           target._textureNaturalColor = Boolean(value);
+          target._sync();
+          return true;
+        }
+        // Mapa de color con imagen: mat.color_map = "cal_blanca" (o un nombre de "Mis texturas")
+        if (prop === 'color_map' || prop === 'textura_imagen' || prop === 'imagen') {
+          target._colorMapId = value == null || value === '' ? null : slugifyTextureId(String(value));
+          target._sync();
+          return true;
+        }
+        // Metros por repetición de la imagen: mat.color_map_scale = 2.5
+        if (prop === 'color_map_scale' || prop === 'tile_m') {
+          target._colorMapTile = Math.max(0.05, Math.min(200, Number(value) || 3));
           target._sync();
           return true;
         }

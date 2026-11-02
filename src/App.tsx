@@ -147,6 +147,13 @@ import PythonScriptModal, {
   GeminiWeeklyUsageStats,
   SceneBoundsData,
 } from './components/PythonScriptModal';
+import MyTexturesPanel from './components/MyTexturesPanel';
+import {
+  ColorMapTextureInfo,
+  applyBoxProjectedUv,
+  getColorMapThreeTexture,
+  preloadColorMapImages,
+} from './utils/textureLibrary';
 import {
   signInWithGoogle,
   signOutUser,
@@ -263,6 +270,10 @@ export default function App() {
     faceIndex: -1,
   });
   const [activeTexture, setActiveTexture] = useState<TexturePatternType>('none');
+  // "Mis texturas": imagen aplicada como mapa de color al modelo actual (tiene prioridad sobre la procedural)
+  const [userColorTextureInfo, setUserColorTextureInfo] = useState<ColorMapTextureInfo | null>(null);
+  const [userColorTexture, setUserColorTexture] = useState<THREE.Texture | null>(null);
+  const [userColorTileMeters, setUserColorTileMeters] = useState<number>(3);
   const [textureCategoryFilter, setTextureCategoryFilter] = useState<'all' | TextureCategoryType>('all');
   const [textureRepeatScale, setTextureRepeatScale] = useState<number>(2);
   const [textureBumpIntensity, setTextureBumpIntensity] = useState<number>(1.0);
@@ -646,10 +657,11 @@ export default function App() {
         const origHex = (mesh.userData.originalColorHex as string) || '#e11d48';
         const hasPerMeshTex = Boolean(mesh.userData.hasPerMeshTexture && mesh.userData.originalMap);
         const targetColor =
-          (!isNone && textureUseNaturalColor) || (isNone && hasPerMeshTex)
+          (!isNone && textureUseNaturalColor) || (isNone && hasPerMeshTex) || Boolean(userColorTexture)
             ? new THREE.Color('#ffffff')
             : new THREE.Color(origHex);
-        const mapToUse = isNone ? mesh.userData.originalMap || null : colorMap;
+        const mapToUse =
+          userColorTexture ?? (isNone ? mesh.userData.originalMap || null : colorMap);
         const bumpMapToUse = isNone ? mesh.userData.originalBumpMap || null : bumpMap;
         const bumpScaleToUse = isNone
           ? (mesh.userData.originalBumpScale as number | undefined) ?? 0
@@ -733,7 +745,36 @@ export default function App() {
     });
 
     refs.resetCyclesAccumulation?.();
-  }, [activeTexture, textureRepeatScale, textureBumpIntensity, textureUseNaturalColor]);
+  }, [activeTexture, textureRepeatScale, textureBumpIntensity, textureUseNaturalColor, userColorTexture]);
+
+  // Mapa propio de "Mis texturas": proyecta las UV por caja en metros y restaura las originales al quitarlo
+  useEffect(() => {
+    const refs = sceneRefs.current;
+    if (!refs || !refs.currentModelWrapper) return;
+
+    refs.currentModelWrapper.traverse((child) => {
+      const mesh = child as THREE.Mesh;
+      if (!mesh.isMesh || mesh.userData.isOutlineMesh || !mesh.geometry) return;
+      if ((mesh.material as THREE.Material)?.type === 'ShaderMaterial') return;
+      const geo = mesh.geometry as THREE.BufferGeometry;
+
+      if (userColorTexture) {
+        if (!('preMyColorUv' in mesh.userData)) {
+          const uvAttr = geo.getAttribute('uv') as THREE.BufferAttribute | undefined;
+          mesh.userData.preMyColorUv = uvAttr ? uvAttr.clone() : null;
+        }
+        mesh.updateMatrix();
+        applyBoxProjectedUv(geo, mesh.matrix, userColorTileMeters);
+      } else if ('preMyColorUv' in mesh.userData) {
+        const prev = mesh.userData.preMyColorUv as THREE.BufferAttribute | null;
+        if (prev) geo.setAttribute('uv', prev.clone());
+        else geo.deleteAttribute('uv');
+        delete mesh.userData.preMyColorUv;
+      }
+    });
+
+    refs.resetCyclesAccumulation?.();
+  }, [userColorTexture, userColorTileMeters]);
 
   // Actualizar tamaño y color visual de los cursores 3D del pincel (Principal + Espejo X)
   useEffect(() => {
@@ -2352,6 +2393,24 @@ export default function App() {
         ? `${painted} triángulos de color similar pintados.`
         : `Pieza rellenada (${painted} triángulos pintados).`
     );
+  };
+
+  // Aplica (o quita, con null) una textura de "Mis texturas" como mapa de color del modelo actual
+  const handleApplyUserTexture = async (info: ColorMapTextureInfo | null) => {
+    if (!info) {
+      setUserColorTextureInfo(null);
+      setUserColorTexture(null);
+      return;
+    }
+    await preloadColorMapImages();
+    const tex = getColorMapThreeTexture(info.id);
+    if (!tex) {
+      setCloudFeedback({ type: 'error', text: `No se pudo cargar la textura "${info.name}"` });
+      setTimeout(() => setCloudFeedback(null), 5000);
+      return;
+    }
+    setUserColorTextureInfo(info);
+    setUserColorTexture(tex);
   };
 
   // Exportar el modelo modificado a archivo .GLB binario (con modo Ligero, Ultra-Ligero o Estándar)
@@ -5138,6 +5197,14 @@ export default function App() {
                   </button>
                 </div>
               </div>
+
+              {/* Mis texturas: subir imágenes y aplicarlas como mapa de color */}
+              <MyTexturesPanel
+                activeId={userColorTextureInfo?.id ?? null}
+                tileMeters={userColorTileMeters}
+                onTileMetersChange={setUserColorTileMeters}
+                onApply={handleApplyUserTexture}
+              />
 
               {/* Exportación GLB (Ligero / Ultra-Ligero / Completo), Captura PNG y Guardar en Nube */}
               <div className="p-3 rounded-lg bg-slate-900/75 border border-slate-800/90 space-y-2.5">
