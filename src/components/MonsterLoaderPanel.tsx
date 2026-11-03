@@ -1,8 +1,18 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Skull, Loader2 } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Skull, Loader2, FolderDown, X } from 'lucide-react';
 import type { GlbSource } from './GlbZonesPanel';
 import { MONSTER_TIERS, MonsterInfo, MonsterTier, generateMonsterGlb, getEnemigoVersion, listMonsters } from '../enemigos/enemyGenerator';
 import { SURFACE_LABELS, monsterSurface, recommendMonsterPlans } from '../enemigos/monsterTextures';
+import { BatchProgress, canPickFolder, exportMonstersBatch, folderSink, zipSink } from '../enemigos/batchExport';
+
+// Peso medio por monstruo ya texturizado (medium y low medidos con los 282; el resto, con lobos y dragón)
+const AVG_MB: Record<MonsterTier, number> = { completo: 6.3, high: 3.9, medium: 2.0, low: 1.2, minimum: 0.75 };
+
+function formatTime(seconds: number): string {
+  if (seconds < 60) return `${Math.max(1, Math.round(seconds))} s`;
+  const m = Math.round(seconds / 60);
+  return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`;
+}
 
 interface MonsterLoaderPanelProps {
   /** Entrega el GLB generado: se muestra en el visor y pasa al panel "Optimizar GLB por zonas" */
@@ -31,6 +41,12 @@ export default function MonsterLoaderPanel({ onLoad }: MonsterLoaderPanelProps) 
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [batchTiers, setBatchTiers] = useState<MonsterTier[]>(['low']);
+  const [batchScope, setBatchScope] = useState<'all' | 'filtered'>('all');
+  const [batchBusy, setBatchBusy] = useState(false);
+  const [progress, setProgress] = useState<BatchProgress | null>(null);
+  const [batchMsg, setBatchMsg] = useState<string | null>(null);
+  const cancelRef = useRef(false);
 
   // El código de los monstruos solo se descarga al abrir el panel
   useEffect(() => {
@@ -56,6 +72,47 @@ export default function MonsterLoaderPanel({ onLoad }: MonsterLoaderPanelProps) 
   }, [monsters, filter]);
 
   const selected = monsters.find((m) => m.key === key);
+  const filtered = useMemo(() => [...groups.values()].flat(), [groups]);
+  // Si la búsqueda deja fuera al monstruo elegido, se elige el primero de la lista visible
+  useEffect(() => {
+    if (filtered.length && !filtered.some((m) => m.key === key)) setKey(filtered[0].key);
+  }, [filtered, key]);
+  const batchList = batchScope === 'all' ? monsters : filtered;
+  const batchCount = batchList.length * batchTiers.length;
+  const batchMb = batchList.length * batchTiers.reduce((s, t) => s + AVG_MB[t], 0);
+  const toFolder = canPickFolder();
+
+  const toggleTier = (t: MonsterTier) =>
+    setBatchTiers((prev) => (prev.includes(t) ? prev.filter((x) => x !== t) : MONSTER_TIERS.map((x) => x.id).filter((x) => x === t || prev.includes(x))));
+
+  const runBatch = async () => {
+    if (!batchCount) return;
+    setBatchMsg(null); setError(null);
+    let sink;
+    try {
+      sink = toFolder ? await folderSink() : zipSink();
+    } catch {
+      return; // el usuario cerró el selector de carpeta
+    }
+    cancelRef.current = false;
+    setBatchBusy(true);
+    try {
+      const { entries, cancelled } = await exportMonstersBatch(batchList, batchTiers, sink, setProgress, () => cancelRef.current);
+      const ok = entries.filter((e) => !e.error);
+      const failed = entries.length - ok.length;
+      const mb = ok.reduce((s, e) => s + e.mb, 0);
+      setBatchMsg(
+        `${cancelled ? 'Cancelado. ' : ''}${ok.length} monstruos guardados (${mb.toFixed(0)} MB)` +
+          (failed ? `, ${failed} con error (ver indice.csv)` : '') +
+          (toFolder ? ' en la carpeta monstruos_salon3d.' : ' en archivos ZIP, uno por calidad y categoría.')
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBatchBusy(false);
+      setProgress(null);
+    }
+  };
 
   const load = async () => {
     if (!selected) return;
@@ -146,6 +203,61 @@ export default function MonsterLoaderPanel({ onLoad }: MonsterLoaderPanelProps) 
           </button>
           {status && <div className="text-[11px] text-slate-300" data-testid="monstruo-estado">{status}</div>}
           {error && <div className="text-[11px] px-2 py-1 rounded border text-rose-300 bg-rose-500/10 border-rose-400/30">{error}</div>}
+
+          <div className="pt-2 mt-1 border-t border-slate-800 space-y-2" data-testid="lote-monstruos">
+            <div className="font-semibold text-rose-200 text-[12px] flex items-center gap-1.5">
+              <FolderDown className="w-3.5 h-3.5" /><span>Descargar en lote con texturas sugeridas</span>
+            </div>
+            <div className="flex flex-wrap gap-x-2.5 gap-y-1">
+              {MONSTER_TIERS.map((t) => (
+                <label key={t.id} className="flex items-center gap-1 text-[11px] text-slate-300">
+                  <input type="checkbox" checked={batchTiers.includes(t.id)} onChange={() => toggleTier(t.id)} disabled={batchBusy} />
+                  <span>{t.id === 'completo' ? 'Completo' : t.id[0].toUpperCase() + t.id.slice(1)}</span>
+                </label>
+              ))}
+            </div>
+            <select
+              value={batchScope}
+              onChange={(e) => setBatchScope(e.target.value as 'all' | 'filtered')}
+              disabled={batchBusy}
+              className="w-full py-1 px-1 rounded bg-slate-900 border border-slate-700 text-[11px] text-slate-100"
+              aria-label="Qué monstruos"
+            >
+              <option value="all">Todos los monstruos ({monsters.length})</option>
+              <option value="filtered">Solo los de la búsqueda ({filtered.length})</option>
+            </select>
+            <div className="text-[10px] text-slate-500">
+              {batchCount} archivos · unos {batchMb >= 1000 ? `${(batchMb / 1000).toFixed(1)} GB` : `${Math.round(batchMb)} MB`} ·
+              {toFolder ? ' se guardan en la carpeta que elijas (subcarpetas por calidad y categoría)' : ' este navegador no deja elegir carpeta: se descargan ZIP por calidad y categoría'}
+            </div>
+            {!batchBusy ? (
+              <button
+                type="button"
+                onClick={runBatch}
+                disabled={!batchCount || !monsters.length}
+                className="w-full py-2 px-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-rose-400/40 text-rose-200 font-semibold flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                <FolderDown className="w-3.5 h-3.5" />
+                <span>{toFolder ? 'Elegir carpeta y descargar' : 'Descargar en ZIP'}</span>
+              </button>
+            ) : (
+              <div className="space-y-1.5" data-testid="lote-progreso">
+                <div className="h-1.5 rounded bg-slate-800 overflow-hidden">
+                  <div className="h-full bg-rose-400 transition-all" style={{ width: `${progress ? (progress.done / Math.max(1, progress.total)) * 100 : 0}%` }} />
+                </div>
+                <div className="flex items-center justify-between gap-2 text-[11px] text-slate-300">
+                  <span className="truncate">
+                    {progress ? `${progress.done}/${progress.total} · ${progress.current}` : 'Preparando…'}
+                    {progress?.etaSeconds ? ` · quedan ~${formatTime(progress.etaSeconds)}` : ''}
+                  </span>
+                  <button type="button" onClick={() => { cancelRef.current = true; }} className="flex items-center gap-1 text-rose-300 hover:text-rose-200 cursor-pointer">
+                    <X className="w-3 h-3" /><span>Cancelar</span>
+                  </button>
+                </div>
+              </div>
+            )}
+            {batchMsg && <div className="text-[11px] text-emerald-300" data-testid="lote-resultado">{batchMsg}</div>}
+          </div>
           {version && <div className="text-[10px] text-slate-600">Enemigo-rpg {version}</div>}
         </>
       )}
