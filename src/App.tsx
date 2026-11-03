@@ -148,6 +148,7 @@ import PythonScriptModal, {
   SceneBoundsData,
 } from './components/PythonScriptModal';
 import MyTexturesPanel from './components/MyTexturesPanel';
+import GlbZonesPanel from './components/GlbZonesPanel';
 import {
   ColorMapTextureInfo,
   ColorMapSet,
@@ -276,6 +277,8 @@ export default function App() {
   const [userColorTextureInfo, setUserColorTextureInfo] = useState<ColorMapTextureInfo | null>(null);
   const [userColorMaps, setUserColorMaps] = useState<ColorMapSet | null>(null);
   const [userColorTileMeters, setUserColorTileMeters] = useState<number>(3);
+  // GLB original subido por el usuario, para el optimizador por zonas (la vista previa no lo sustituye)
+  const [sourceGlb, setSourceGlb] = useState<{ name: string; file: File } | null>(null);
   const [textureCategoryFilter, setTextureCategoryFilter] = useState<'all' | TextureCategoryType>('all');
   const [textureRepeatScale, setTextureRepeatScale] = useState<number>(2);
   const [textureBumpIntensity, setTextureBumpIntensity] = useState<number>(1.0);
@@ -2230,6 +2233,7 @@ export default function App() {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file && sceneRefs.current) {
+      if (/\.glb$/i.test(file.name)) setSourceGlb({ name: file.name, file });
       sceneRefs.current.loadGlbFromFile(file);
     }
     e.target.value = '';
@@ -2254,6 +2258,7 @@ export default function App() {
 
     const file = e.dataTransfer.files?.[0];
     if (file && sceneRefs.current) {
+      if (/\.glb$/i.test(file.name)) setSourceGlb({ name: file.name, file });
       sceneRefs.current.loadGlbFromFile(file);
     }
   }, []);
@@ -5255,6 +5260,9 @@ export default function App() {
                   </button>
                 </div>
               </div>
+
+              {/* Optimizador por zonas: solo aparece con un GLB subido por el usuario */}
+              <GlbZonesPanel source={sourceGlb} onPreview={(f) => sceneRefs.current?.loadGlbFromFile(f)} />
 
               {/* Mis texturas: subir imágenes y aplicarlas como mapa de color */}
               <MyTexturesPanel

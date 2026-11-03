@@ -34,6 +34,7 @@ export type TexturePatternType =
   | 'leather_tufted'
   | 'royal_velvet'
   | 'woven_linen'
+  | 'beast_hide'
   // Fantasía, Sci-Fi y Anime
   | 'dragon_scales'
   | 'biomech_plates'
@@ -528,6 +529,22 @@ export const TEXTURE_PRESETS: TexturePresetInfo[] = [
     },
   },
 
+  {
+    id: 'beast_hide',
+    name: 'Piel de Bestia / Cuero Granulado',
+    category: 'tejidos',
+    description: 'Grano de poros irregulares que se repite sin costuras: piel de monstruo, orco, botas y correas',
+    thumbnailColor: '#8a6a4a',
+    pbr: {
+      naturalColorHex: '#8a6448',
+      roughness: 0.7,
+      metalness: 0.0,
+      clearcoat: 0.08,
+      ior: 1.45,
+      bumpScale: 0.03,
+    },
+  },
+
   // === 4. FANTASÍA, SCI-FI Y ESTILIZADO ===
   {
     id: 'dragon_scales',
@@ -688,6 +705,7 @@ const TEXTURE_ALIAS_MAP: Record<string, TexturePatternType> = {
   leather_tufted: 'leather_tufted',
   royal_velvet: 'royal_velvet',
   woven_linen: 'woven_linen',
+  beast_hide: 'beast_hide',
   dragon_scales: 'dragon_scales',
   biomech_plates: 'biomech_plates',
   magma_cracks: 'magma_cracks',
@@ -799,6 +817,9 @@ const TEXTURE_ALIAS_MAP: Record<string, TexturePatternType> = {
   circuitos: 'cyber_circuits',
   cyber: 'cyber_circuits',
   porcelana: 'smooth_skin',
+  piel_bestia: 'beast_hide',
+  cuero_granulado: 'beast_hide',
+  hide: 'beast_hide',
 };
 
 export function resolveTexturePatternId(rawName: string): TexturePatternType {
@@ -1963,6 +1984,35 @@ function renderPatternToCanvas(
       ctx.arc(cx, cy, 4, 0, Math.PI * 2);
       ctx.fill();
     }
+  } else if (type === 'beast_hide') {
+    // Grano de piel: celdas de Voronoi periódicas (sin costuras al repetir)
+    const imgData = ctx.createImageData(size, size);
+    const data = imgData.data;
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const u = x / size;
+        const v = y / size;
+        const big = voronoi2D(u, v, 18, 811);
+        const fine = voronoi2D(u, v, 52, 829);
+        const crease = Math.min(1, (big.f2 - big.f1) * 3.2); // 0 en la grieta entre poros
+        const pore = Math.min(1, (fine.f2 - fine.f1) * 2.4);
+        const h = 0.35 + 0.45 * crease + 0.12 * pore + 0.08 * big.cellHash;
+        const idx = (y * size + x) * 4;
+        if (isBumpPass) {
+          const b = Math.round(Math.min(1, h) * 255);
+          data[idx] = b;
+          data[idx + 1] = b;
+          data[idx + 2] = b;
+        } else {
+          const f = 0.74 + 0.22 * crease + 0.06 * pore + 0.1 * (big.cellHash - 0.5);
+          data[idx] = Math.min(255, Math.round(r255 * f));
+          data[idx + 1] = Math.min(255, Math.round(g255 * f));
+          data[idx + 2] = Math.min(255, Math.round(b255 * f));
+        }
+        data[idx + 3] = 255;
+      }
+    }
+    ctx.putImageData(imgData, 0, 0);
   } else if (type === 'smooth_skin') {
     const grad = ctx.createLinearGradient(0, 0, size, size);
     if (isBumpPass) {
