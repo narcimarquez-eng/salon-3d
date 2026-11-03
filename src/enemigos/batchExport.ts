@@ -138,7 +138,13 @@ export async function exportMonstersBatch(
 // ---------------------------------------------------------------------------
 /* eslint-disable @typescript-eslint/no-explicit-any */
 export function canPickFolder(): boolean {
-  return typeof (window as any).showDirectoryPicker === 'function';
+  if (typeof (window as any).showDirectoryPicker !== 'function') return false;
+  // Dentro de un marco de otra web (vista previa, editor...) Chrome no deja abrir el selector
+  try {
+    return window.top === window.self;
+  } catch {
+    return false;
+  }
 }
 
 export async function folderSink(rootName = 'monstruos_salon3d'): Promise<BatchSink> {

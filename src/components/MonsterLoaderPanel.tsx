@@ -46,6 +46,7 @@ export default function MonsterLoaderPanel({ onLoad }: MonsterLoaderPanelProps) 
   const [batchBusy, setBatchBusy] = useState(false);
   const [progress, setProgress] = useState<BatchProgress | null>(null);
   const [batchMsg, setBatchMsg] = useState<string | null>(null);
+  const [batchError, setBatchError] = useState<string | null>(null);
   const cancelRef = useRef(false);
 
   // El código de los monstruos solo se descarga al abrir el panel
@@ -85,14 +86,29 @@ export default function MonsterLoaderPanel({ onLoad }: MonsterLoaderPanelProps) 
   const toggleTier = (t: MonsterTier) =>
     setBatchTiers((prev) => (prev.includes(t) ? prev.filter((x) => x !== t) : MONSTER_TIERS.map((x) => x.id).filter((x) => x === t || prev.includes(x))));
 
-  const runBatch = async () => {
+  const runBatch = async (mode: 'folder' | 'zip') => {
     if (!batchCount) return;
-    setBatchMsg(null); setError(null);
+    setBatchMsg(null); setBatchError(null);
     let sink;
-    try {
-      sink = toFolder ? await folderSink() : zipSink();
-    } catch {
-      return; // el usuario cerró el selector de carpeta
+    if (mode === 'folder') {
+      const t0 = performance.now();
+      try {
+        sink = await folderSink();
+      } catch (e) {
+        const name = e instanceof DOMException ? e.name : '';
+        const quick = performance.now() - t0 < 800; // nadie cierra la ventana tan rápido: no llegó a abrirse
+        if (name === 'AbortError' && !quick) {
+          setBatchMsg('No se eligió ninguna carpeta; no se ha descargado nada.');
+        } else {
+          setBatchError(
+            `Chrome no ha abierto la ventana para elegir carpeta${e instanceof Error ? ` (${e.name}: ${e.message})` : ''}. ` +
+              'Usa "Descargar en ZIP": hace lo mismo y los archivos van a tu carpeta de descargas.'
+          );
+        }
+        return;
+      }
+    } else {
+      sink = zipSink();
     }
     cancelRef.current = false;
     setBatchBusy(true);
@@ -104,10 +120,10 @@ export default function MonsterLoaderPanel({ onLoad }: MonsterLoaderPanelProps) 
       setBatchMsg(
         `${cancelled ? 'Cancelado. ' : ''}${ok.length} monstruos guardados (${mb.toFixed(0)} MB)` +
           (failed ? `, ${failed} con error (ver indice.csv)` : '') +
-          (toFolder ? ' en la carpeta monstruos_salon3d.' : ' en archivos ZIP, uno por calidad y categoría.')
+          (mode === 'folder' ? ' en la carpeta monstruos_salon3d.' : ' en archivos ZIP (carpeta de descargas), uno por calidad y categoría.')
       );
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setBatchError(e instanceof Error ? e.message : String(e));
     } finally {
       setBatchBusy(false);
       setProgress(null);
@@ -228,18 +244,33 @@ export default function MonsterLoaderPanel({ onLoad }: MonsterLoaderPanelProps) 
             </select>
             <div className="text-[10px] text-slate-500">
               {batchCount} archivos · unos {batchMb >= 1000 ? `${(batchMb / 1000).toFixed(1)} GB` : `${Math.round(batchMb)} MB`} ·
-              {toFolder ? ' se guardan en la carpeta que elijas (subcarpetas por calidad y categoría)' : ' este navegador no deja elegir carpeta: se descargan ZIP por calidad y categoría'}
+              {toFolder
+                ? ' con "Elegir carpeta" se guardan en la carpeta que elijas; con ZIP, en tu carpeta de descargas'
+                : ' aquí no se puede elegir carpeta: se descargan ZIP (por calidad y categoría) en tu carpeta de descargas'}
             </div>
             {!batchBusy ? (
-              <button
-                type="button"
-                onClick={runBatch}
-                disabled={!batchCount || !monsters.length}
-                className="w-full py-2 px-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-rose-400/40 text-rose-200 font-semibold flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
-              >
-                <FolderDown className="w-3.5 h-3.5" />
-                <span>{toFolder ? 'Elegir carpeta y descargar' : 'Descargar en ZIP'}</span>
-              </button>
+              <div className="space-y-1.5">
+                {toFolder && (
+                  <button
+                    type="button"
+                    onClick={() => void runBatch('folder')}
+                    disabled={!batchCount || !monsters.length}
+                    className="w-full py-2 px-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-rose-400/40 text-rose-200 font-semibold flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  >
+                    <FolderDown className="w-3.5 h-3.5" />
+                    <span>Elegir carpeta y descargar</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => void runBatch('zip')}
+                  disabled={!batchCount || !monsters.length}
+                  className={`w-full rounded-lg font-semibold flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 ${toFolder ? 'py-1.5 px-2 text-[11px] text-slate-300 hover:text-rose-200 bg-transparent border border-slate-700' : 'py-2 px-2 bg-slate-800 hover:bg-slate-700 border border-rose-400/40 text-rose-200'}`}
+                >
+                  <FolderDown className="w-3.5 h-3.5" />
+                  <span>Descargar en ZIP</span>
+                </button>
+              </div>
             ) : (
               <div className="space-y-1.5" data-testid="lote-progreso">
                 <div className="h-1.5 rounded bg-slate-800 overflow-hidden">
@@ -257,6 +288,9 @@ export default function MonsterLoaderPanel({ onLoad }: MonsterLoaderPanelProps) 
               </div>
             )}
             {batchMsg && <div className="text-[11px] text-emerald-300" data-testid="lote-resultado">{batchMsg}</div>}
+            {batchError && (
+              <div className="text-[11px] px-2 py-1 rounded border text-rose-300 bg-rose-500/10 border-rose-400/30" data-testid="lote-error">{batchError}</div>
+            )}
           </div>
           {version && <div className="text-[10px] text-slate-600">Enemigo-rpg {version}</div>}
         </>
