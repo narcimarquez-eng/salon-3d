@@ -5,6 +5,8 @@
 //   2. Recompresión de imágenes: tamaño máximo por zona y JPEG para las opacas que no son mapas normales.
 //   3. Datos de huesos compactos: índices JOINTS de 16 a 8 bits (sin pérdida si hay < 256 huesos) y
 //      pesos WEIGHTS de float a 16 bits normalizados (error < 0,00002).
+//   4. Reducción de triángulos opcional (meshoptimizer): simplifica cada malla respetando costuras de UV,
+//      y conserva por vértice los huesos/pesos originales, así que las animaciones siguen funcionando.
 // Todo lo demás (esqueletos, animaciones, extensiones desconocidas, nodos, luces) se conserva tal cual.
 
 import {
@@ -14,6 +16,7 @@ import {
   getTexturePresetInfo,
 } from './proceduralTextures';
 import { getColorMapSet, preloadColorMapImages } from './textureLibrary';
+import { MeshoptSimplifier } from 'meshoptimizer';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type Json = any;
@@ -51,6 +54,8 @@ export interface ZonePlan {
 export interface OptimizeOptions {
   jpegQuality: number;
   compactSkin: boolean;
+  /** Fracción de triángulos que se conserva (1 = sin cambio, 0.25 = una cuarta parte) */
+  triangleRatio?: number;
 }
 
 export interface SizeBreakdown {
@@ -342,6 +347,150 @@ function isOpaque(canvas: HTMLCanvasElement): boolean {
 // ---------------------------------------------------------------------------
 // Optimización
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Reducción de triángulos
+// ---------------------------------------------------------------------------
+/** Copia los elementos indicados de un accesor a una vista nueva compacta (alineada a 4 bytes). */
+function gatherAccessor(json: Json, views: Uint8Array[], accIndex: number, order: Uint32Array): { bytes: Uint8Array; stride: number } {
+  const acc = json.accessors[accIndex];
+  const elem = TYPE_COUNT[acc.type] * COMPONENT_SIZE[acc.componentType];
+  const stride = pad4(elem);
+  const out = new Uint8Array(order.length * stride);
+  if (acc.bufferView === undefined) return { bytes: out, stride };
+  const src = views[acc.bufferView];
+  const srcStride = json.bufferViews[acc.bufferView].byteStride || elem;
+  const base = acc.byteOffset || 0;
+  for (let i = 0; i < order.length; i++) {
+    const o = base + order[i] * srcStride;
+    out.set(src.subarray(o, o + elem), i * stride);
+  }
+  return { bytes: out, stride };
+}
+
+function minMax(data: Float32Array, comps: number): { min: number[]; max: number[] } {
+  const min = new Array(comps).fill(Infinity);
+  const max = new Array(comps).fill(-Infinity);
+  for (let i = 0; i < data.length; i += comps) {
+    for (let c = 0; c < comps; c++) {
+      const v = data[i + c];
+      if (v < min[c]) min[c] = v;
+      if (v > max[c]) max[c] = v;
+    }
+  }
+  return { min, max };
+}
+
+/** Accesores usados desde mallas, esqueletos, animaciones e instancias; los demás se eliminan. */
+function pruneAccessors(json: Json): void {
+  const refs: { obj: Json; key: string | number }[] = [];
+  const add = (obj: Json, key: string | number) => { if (obj && typeof obj[key] === 'number') refs.push({ obj, key }); };
+  for (const m of json.meshes || []) {
+    for (const p of m.primitives || []) {
+      add(p, 'indices');
+      for (const k of Object.keys(p.attributes || {})) add(p.attributes, k);
+      for (const t of p.targets || []) for (const k of Object.keys(t)) add(t, k);
+    }
+  }
+  for (const sk of json.skins || []) add(sk, 'inverseBindMatrices');
+  for (const an of json.animations || []) for (const smp of an.samplers || []) { add(smp, 'input'); add(smp, 'output'); }
+  for (const n of json.nodes || []) {
+    const inst = n.extensions?.EXT_mesh_gpu_instancing?.attributes;
+    if (inst) for (const k of Object.keys(inst)) add(inst, k);
+  }
+  const used = new Set(refs.map((r) => r.obj[r.key] as number));
+  const remap = new Map<number, number>();
+  const kept: Json[] = [];
+  (json.accessors || []).forEach((a: Json, i: number) => { if (used.has(i)) { remap.set(i, kept.length); kept.push(a); } });
+  for (const r of refs) r.obj[r.key] = remap.get(r.obj[r.key]);
+  json.accessors = kept;
+}
+
+async function reduceTriangles(json: Json, views: Uint8Array[], ratio: number, addView: (b: Uint8Array, target?: number) => number, notes: string[]): Promise<void> {
+  const blocked = (json.extensionsUsed || []).filter((e: string) => e === 'KHR_draco_mesh_compression' || e === 'EXT_meshopt_compression');
+  if (blocked.length) { notes.push(`No se pueden reducir triángulos: la geometría viene comprimida (${blocked.join(', ')}).`); return; }
+  await MeshoptSimplifier.ready;
+  let before = 0, after = 0;
+  const done = new Map<string, Json>(); // primitivas que comparten accesores se procesan una vez
+  for (const m of json.meshes || []) {
+    for (const p of m.primitives || []) {
+      if ((p.mode ?? 4) !== 4 || p.attributes?.POSITION === undefined) continue;
+      const accIdx = [p.attributes.POSITION, ...Object.values(p.attributes), ...(p.targets || []).flatMap((t: Json) => Object.values(t))] as number[];
+      if (accIdx.some((i) => json.accessors[i].sparse)) continue;
+      const key = JSON.stringify([p.indices, p.attributes, p.targets]);
+      const prev = done.get(key);
+      if (prev) { p.indices = prev.indices; p.attributes = { ...prev.attributes }; if (prev.targets) p.targets = prev.targets.map((t: Json) => ({ ...t })); continue; }
+
+      const posAcc = json.accessors[p.attributes.POSITION];
+      const vcount = posAcc.count;
+      let indices: Uint32Array;
+      if (p.indices !== undefined) indices = Uint32Array.from(readAccessor(json, views, p.indices).data);
+      else { indices = new Uint32Array(vcount); for (let i = 0; i < vcount; i++) indices[i] = i; }
+      indices = indices.subarray(0, indices.length - (indices.length % 3));
+      const triCount = indices.length / 3;
+      before += triCount;
+      if (triCount < 16) { after += triCount; continue; } // piezas diminutas: no merece la pena
+
+      // Vértices propios de esta primitiva
+      const local = indices.slice();
+      const [remap0, unique0] = MeshoptSimplifier.compactMesh(local);
+      const allPos = readAccessor(json, views, p.attributes.POSITION).data;
+      const pos = new Float32Array(unique0 * 3);
+      for (let v = 0; v < vcount; v++) { const r = remap0[v]; if (r !== 0xffffffff && r < unique0) { pos[r * 3] = allPos[v * 3]; pos[r * 3 + 1] = allPos[v * 3 + 1]; pos[r * 3 + 2] = allPos[v * 3 + 2]; } }
+
+      const target = Math.max(12, Math.floor((triCount * ratio)) * 3);
+      let [simp] = MeshoptSimplifier.simplify(local, pos, 3, target, 0.01);
+      // Si con poco error no llega al objetivo, se permite algo más de desviación
+      for (const err of [0.03, 0.08]) {
+        if (simp.length <= target * 1.1) break;
+        [simp] = MeshoptSimplifier.simplify(local, pos, 3, target, err);
+      }
+      if (simp.length >= local.length) { after += triCount; continue; }
+
+      // Compactar: solo quedan los vértices que usa la malla simplificada
+      const finalIdx = simp.slice();
+      const [remap1, unique1] = MeshoptSimplifier.compactMesh(finalIdx);
+      const order = new Uint32Array(unique1); // nuevo índice -> vértice original
+      for (let v = 0; v < vcount; v++) {
+        const r0 = remap0[v];
+        if (r0 === 0xffffffff || r0 >= unique0) continue;
+        const r1 = remap1[r0];
+        if (r1 !== 0xffffffff && r1 < unique1) order[r1] = v;
+      }
+
+      const rewrite = (accIndex: number, withBounds: boolean): number => {
+        const old = json.accessors[accIndex];
+        const { bytes, stride } = gatherAccessor(json, views, accIndex, order);
+        const elem = TYPE_COUNT[old.type] * COMPONENT_SIZE[old.componentType];
+        const view = addView(bytes, 34962);
+        if (stride !== elem) json.bufferViews[view].byteStride = stride;
+        const acc: Json = { bufferView: view, componentType: old.componentType, count: unique1, type: old.type };
+        if (old.normalized) acc.normalized = true;
+        if (old.name) acc.name = old.name;
+        if (withBounds && old.componentType === 5126) {
+          const comps = TYPE_COUNT[old.type];
+          const f = new Float32Array(unique1 * comps);
+          const dv = new DataView(bytes.buffer);
+          for (let i = 0; i < unique1; i++) for (let c = 0; c < comps; c++) f[i * comps + c] = dv.getFloat32(i * stride + c * 4, true);
+          Object.assign(acc, minMax(f, comps));
+        }
+        json.accessors.push(acc);
+        return json.accessors.length - 1;
+      };
+      const newAttrs: Json = {};
+      for (const [sem, a] of Object.entries(p.attributes) as [string, number][]) newAttrs[sem] = rewrite(a, sem === 'POSITION');
+      p.attributes = newAttrs;
+      if (p.targets) p.targets = p.targets.map((t: Json) => Object.fromEntries(Object.entries(t).map(([sem, a]) => [sem, rewrite(a as number, sem === 'POSITION')])));
+      const idxData = unique1 < 65536 ? new Uint16Array(finalIdx) : new Uint32Array(finalIdx);
+      json.accessors.push({ bufferView: addView(new Uint8Array(idxData.buffer), 34963), componentType: unique1 < 65536 ? 5123 : 5125, count: finalIdx.length, type: 'SCALAR' });
+      p.indices = json.accessors.length - 1;
+      done.set(key, p);
+      after += finalIdx.length / 3;
+    }
+  }
+  pruneAccessors(json);
+  if (before) notes.push(`Triángulos: ${before.toLocaleString()} → ${after.toLocaleString()} (${Math.round((after / before) * 100)} %). Huesos y pesos de cada vértice conservados.`);
+}
+
 export async function optimizeGlb(
   buffer: ArrayBuffer,
   plans: Map<number, ZonePlan>,
@@ -376,6 +525,9 @@ export async function optimizeGlb(
     json.textures.push({ source: json.images.length - 1, sampler: getRepeatSampler() });
     return json.textures.length - 1;
   };
+
+  // 0. Reducción de triángulos (antes de generar UV o compactar huesos, que leen la geometría nueva)
+  if (options.triangleRatio && options.triangleRatio < 1) await reduceTriangles(json, views, options.triangleRatio, addView, notes);
 
   // 1. Texturas por zona
   const needsUser = [...plans.values()].some((p) => p.choice.kind === 'user');

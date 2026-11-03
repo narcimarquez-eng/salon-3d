@@ -50,6 +50,7 @@ export default function GlbZonesPanel({ source, onPreview }: GlbZonesPanelProps)
   const [userTextures, setUserTextures] = useState<ColorMapTextureInfo[]>([]);
   const [compactSkin, setCompactSkin] = useState(true);
   const [replaceExisting, setReplaceExisting] = useState(false);
+  const [triangleRatio, setTriangleRatio] = useState(1);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<OptimizeResult | null>(null);
@@ -92,7 +93,7 @@ export default function GlbZonesPanel({ source, onPreview }: GlbZonesPanelProps)
     setBusy(true); setError(null);
     try {
       const buf = await source.file.arrayBuffer();
-      const r = await optimizeGlb(buf, plans, { jpegQuality: 0.88, compactSkin });
+      const r = await optimizeGlb(buf, plans, { jpegQuality: 0.88, compactSkin, triangleRatio });
       setResult(r);
       const base = source.name.replace(/\.glb$/i, '');
       const copy = new Uint8Array(r.bytes.length); copy.set(r.bytes);
@@ -149,6 +150,18 @@ export default function GlbZonesPanel({ source, onPreview }: GlbZonesPanelProps)
           <span>Huesos compactos</span>
         </label>
       </div>
+      <label className="flex items-center justify-between gap-2 text-[11px] text-slate-300"
+        title="Simplifica las mallas conservando costuras de UV, huesos y animaciones. Para navegador o móvil, 25–50 %.">
+        <span>Triángulos que se conservan</span>
+        <select value={triangleRatio} onChange={(e) => setTriangleRatio(Number(e.target.value))} aria-label="Triángulos que se conservan"
+          className="py-1 px-1 rounded bg-slate-900 border border-slate-700 text-[11px] text-slate-100">
+          {[1, 0.75, 0.5, 0.25, 0.1].map((r) => (
+            <option key={r} value={r}>
+              {r === 1 ? '100 % (sin cambio)' : `${r * 100} %${summary ? ` (~${Math.round((summary.triangles * r) / 1000)}k)` : ''}`}
+            </option>
+          ))}
+        </select>
+      </label>
       <label className="flex items-center gap-1.5 text-[11px] text-slate-300" title="Por defecto, las zonas que ya tienen textura propia la conservan al sugerir">
         <input type="checkbox" checked={replaceExisting} onChange={(e) => setReplaceExisting(e.target.checked)} />
         <span>Sugerir también en zonas que ya tienen textura</span>
@@ -221,6 +234,7 @@ export default function GlbZonesPanel({ source, onPreview }: GlbZonesPanelProps)
           <div className="grid grid-cols-3 gap-x-2 font-mono">
             <span className="text-slate-500">Parte</span><span className="text-slate-500">Antes</span><span className="text-slate-500">Después</span>
             <span>Total</span><span>{mb(result.before.size.total)}</span><span className="text-emerald-300">{mb(result.after.size.total)}</span>
+            <span>Triángulos</span><span>{result.before.triangles.toLocaleString()}</span><span>{result.after.triangles.toLocaleString()}</span>
             <span>Imágenes</span><span>{mb(result.before.size.images)}</span><span>{mb(result.after.size.images)}</span>
             <span>Geometría</span><span>{mb(result.before.size.geometry)}</span><span>{mb(result.after.size.geometry)}</span>
             <span>Animación</span><span>{mb(result.before.size.animation)}</span><span>{mb(result.after.size.animation)}</span>
