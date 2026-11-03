@@ -3,14 +3,16 @@ import math
 
 # COORD_MODE: Z_UP
 # ==============================================================================
-# ERMITA DE MONTEMAYOR (Moguer, Huelva) - reconstrucción aproximada
+# ERMITA DE MONTEMAYOR (Moguer, Huelva) - versión 2, basada en fotografías
 # ==============================================================================
-# Reconstrucción de una ermita andaluza de nave única con cabecera ochavada,
-# fachada de cal con espadaña de dos campanas, portada de ladrillo mudéjar,
-# cubierta de teja árabe, patio de acceso con cipreses y muro bajo.
-# Nota: la forma exacta de la ermita no se ha verificado con planos ni fotos;
-# las proporciones y los detalles son típicos de la arquitectura de la zona.
-# Ejes: X = ancho, Y = profundidad (la fachada mira a Y negativo), Z = altura.
+# Edificio blanco de cal con zócalos, cornisas y recercados de ladrillo naranja.
+# - Nave central de dos aguas (cumbrera a lo largo del eje Y) con gablete a la fachada.
+# - Portada de ladrillo de arco de medio punto, puerta de madera, reja y abanico.
+# - Espadaña de dos campanas en el frente derecho, con cruz de forja.
+# - Torre octogonal con óculo de ladrillo y cubierta piramidal con linterna.
+# - Ala izquierda más baja, con ventanas de arco y rejas de hierro.
+# - Faroles de forja en los muros, escudo cerámico y escalinata de ladrillo.
+# Ejes: X = ancho, Y = profundidad (la fachada principal mira a Y negativo), Z = altura.
 # ==============================================================================
 
 bpy.ops.object.select_all(action='SELECT')
@@ -65,216 +67,212 @@ def esfera(nombre, centro, radio, mat, escala=(1.0, 1.0, 1.0)):
     obj.scale = escala
     return asignar_mat(obj, mat)
 
-def arco_escalonado(prefijo, x, y, z_base, ancho, alto, mat, pasos=6, marco=None):
-    # Vano con remate de medio punto por escalones (frente a Y negativo)
+def arco_medio_punto(prefijo, x, y, z_base, ancho, alto, mat, pasos=8, marco=None):
+    # Vano con remate de medio punto por escalones; frente a Y negativo
     rad = ancho / 2
     if marco:
-        rm = rad + 0.25
-        caja(prefijo + "_Jamba_I", (x - rm, y, z_base + alto / 2), (0.25, 0.4, alto), marco)
-        caja(prefijo + "_Jamba_D", (x + rm, y, z_base + alto / 2), (0.25, 0.4, alto), marco)
+        rm = rad + 0.3
+        caja(prefijo + "_Jamba_I", (x - rm, y, z_base + alto / 2), (0.3, 0.45, alto), marco)
+        caja(prefijo + "_Jamba_D", (x + rm, y, z_base + alto / 2), (0.3, 0.45, alto), marco)
         for k in range(pasos):
             h = (k + 0.5) / pasos * rm
             w = 2 * math.sqrt(max(0.0, rm * rm - h * h))
-            caja(prefijo + "_Dovela_" + str(k), (x, y, z_base + alto + h), (w, 0.4, rm / pasos + 0.02), marco)
+            caja(prefijo + "_Dovela_" + str(k), (x, y, z_base + alto + h), (w, 0.45, rm / pasos + 0.03), marco)
     caja(prefijo + "_Vano", (x, y, z_base + alto / 2), (ancho, 0.3, alto), mat)
     for k in range(pasos):
         h = (k + 0.5) / pasos * rad
         w = 2 * math.sqrt(max(0.0, rad * rad - h * h))
-        caja(prefijo + "_Arco_" + str(k), (x, y, z_base + alto + h), (w, 0.3, rad / pasos + 0.02), mat)
+        caja(prefijo + "_Arco_" + str(k), (x, y, z_base + alto + h), (w, 0.3, rad / pasos + 0.03), mat)
+
+def tejado_dos_aguas(prefijo, x0, x1, y0, y1, z_alero, altura, mat_teja, mat_borde, volado=0.8):
+    # Cubierta a dos aguas con cumbrera paralela a Y.
+    # Faldón derecho: rot_y = +θ (su borde exterior baja). Faldón izquierdo: rot_y = -θ.
+    xc = (x0 + x1) / 2
+    semi = (x1 - x0) / 2 + volado
+    theta = math.atan2(altura, semi)
+    slope_len = math.hypot(semi, altura)
+    ridge_z = z_alero + altura
+    yc = (y0 + y1) / 2
+    yl = (y1 - y0) + 2 * volado
+    for sx in [-1, 1]:
+        d = semi / 2
+        cx = xc + sx * d
+        cz = ridge_z - d * math.tan(theta) - 0.12
+        caja(prefijo + "_Faldon_" + str(sx), (cx, yc, cz), (slope_len, yl, 0.24), mat_teja, rot=(0, sx * theta, 0))
+        for k in range(12):
+            yy = y0 - volado + 0.3 + k * (yl - 0.6) / 11
+            caja(prefijo + "_Canal_" + str(sx) + "_" + str(k), (cx, yy, cz + 0.2), (slope_len * 0.98, 0.1, 0.07), mat_teja, rot=(0, sx * theta, 0))
+    caja(prefijo + "_Cumbrera", (xc, yc, ridge_z + 0.08), (0.45, yl, 0.2), mat_teja)
+    for sx in [-1, 1]:
+        caja(prefijo + "_Cornisa_Ladrillo_" + str(sx), (xc + sx * (semi - 0.3), yc, z_alero - 0.1), (0.5, yl, 0.35), mat_borde)
+    return ridge_z
 
 # ==========================================
-# 1. MATERIALES (texturas explícitas; la cal y la teja usan las del repo)
+# 1. MATERIALES
 # ==========================================
-m_cal = material("EM_Cal_Blanca", (0.92, 0.90, 0.84, 1.0), 0.8)
+m_cal = material("EM_Cal_Blanca", (0.93, 0.91, 0.86, 1.0), 0.8)
 m_cal.color_map = "cal_blanca"
 m_cal.color_map_scale = 2.0
-m_teja = material("EM_Teja_Arabe", (0.62, 0.32, 0.18, 1.0), 0.8)
+m_teja = material("EM_Teja_Arabe", (0.62, 0.36, 0.20, 1.0), 0.75)
 m_teja.color_map = "teja_arcilla"
 m_teja.color_map_scale = 2.5
 m_teja.texture = "terracotta_roof"
 m_teja.texture_repeat = 6
-m_ladrillo = material("EM_Ladrillo_Mudejar", (0.55, 0.24, 0.12, 1.0), 0.85)
+m_ladrillo = material("EM_Ladrillo_Naranja", (0.80, 0.40, 0.18, 1.0), 0.8)
 m_ladrillo.texture = "brick_mudejar"
-m_ladrillo.texture_repeat = 6
-m_piedra = material("EM_Piedra_Sillar", (0.80, 0.75, 0.64, 1.0), 0.7)
-m_piedra.texture = "stone_ashlar"
-m_piedra.texture_repeat = 4
-m_suelo = material("EM_Empedrado", (0.62, 0.55, 0.44, 1.0), 0.9)
-m_suelo.texture = "cobblestone"
-m_suelo.texture_repeat = 8
-m_madera = material("EM_Madera_Puerta", (0.30, 0.17, 0.08, 1.0), 0.7)
+m_ladrillo.texture_repeat = 8
+m_piedra = material("EM_Piedra_Clara", (0.86, 0.82, 0.72, 1.0), 0.7)
+m_hierro = material("EM_Hierro_Forja", (0.08, 0.08, 0.09, 1.0), 0.45, 0.8)
+m_hierro.texture = "brushed_metal"
+m_madera = material("EM_Madera_Oscura", (0.20, 0.11, 0.05, 1.0), 0.7)
 m_madera.texture = "wood_oak"
 m_madera.texture_repeat = 3
-m_hierro = material("EM_Hierro_Forja", (0.12, 0.12, 0.13, 1.0), 0.45, 0.8)
-m_hierro.texture = "brushed_metal"
+m_cristal = material("EM_Vidrio_Oscuro", (0.05, 0.08, 0.09, 1.0), 0.15, 0.1)
+m_hueco = material("EM_Hueco_Sombra", (0.03, 0.025, 0.02, 1.0), 0.95)
 m_bronce = material("EM_Campana_Bronce", (0.62, 0.42, 0.18, 1.0), 0.35, 0.9)
-m_hueco = material("EM_Hueco_Oscuro", (0.04, 0.035, 0.03, 1.0), 0.95)
-m_cipres = material("EM_Cipres", (0.10, 0.24, 0.12, 1.0), 0.85)
-m_tronco = material("EM_Tronco_Cipres", (0.30, 0.20, 0.12, 1.0), 0.9)
-m_azulejo = material("EM_Azulejo_Azul", (0.10, 0.28, 0.60, 1.0), 0.3)
-m_azulejo.texture = "andalusi_tiles"
-m_azulejo.texture_repeat = 3
-m_cristal = material("EM_Vidrio_Emplomado", (0.55, 0.70, 0.75, 1.0), 0.15)
-m_cristal.texture = "stained_glass"
-m_cristal.texture_repeat = 1
+m_arena = material("EM_Arena_Plaza", (0.66, 0.38, 0.20, 1.0), 0.95)
+m_farol = material("EM_Farol_Metal", (0.05, 0.05, 0.05, 1.0), 0.4, 0.6)
+m_luz = material("EM_Luz_Farol", (1.0, 0.85, 0.5, 1.0), 0.3)
+m_escudo = material("EM_Escudo_Ceramica", (0.88, 0.55, 0.20, 1.0), 0.4)
 
 # ==========================================
-# 2. SUELO: PLAZA DE ACCESO Y ESCALONES
+# 2. PLAZA Y ESCALINATA DE LADRILLO
 # ==========================================
-caja("EM_Patio_Empedrado", (0, -12.0, 0.04), (26.0, 16.0, 0.08), m_suelo)
-caja("EM_Plataforma", (0, 0, 0.25), (17.0, 22.0, 0.5), m_piedra)
+caja("EM_Plaza_Arena", (0, -8.0, -0.05), (40.0, 34.0, 0.1), m_arena)
+for k in range(4):
+    caja("EM_Escalinata_" + str(k), (0, -17.0 - k * 0.6, 0.15 + k * 0.15), (14.0, 0.7, 0.3 + k * 0.15), m_ladrillo)
+
+# ==========================================
+# 3. NAVE CENTRAL: MUROS DE CAL, ZÓCALO Y CORNISAS
+# ==========================================
+NX0, NX1 = -6.0, 6.0
+NY0, NY1 = -8.0, 10.0
+HW = 6.0
+caja("EM_Nave_Muro", (0, (NY0 + NY1) / 2, HW / 2), (NX1 - NX0, NY1 - NY0, HW), m_cal)
+caja("EM_Nave_Zocalo_Frente", (0, NY0 - 0.02, 0.45), (NX1 - NX0 + 0.1, 0.2, 0.9), m_ladrillo)
+caja("EM_Nave_Zocalo_Lado_I", (NX0 - 0.02, (NY0 + NY1) / 2, 0.45), (0.2, NY1 - NY0, 0.9), m_ladrillo)
+caja("EM_Nave_Zocalo_Lado_D", (NX1 + 0.02, (NY0 + NY1) / 2, 0.45), (0.2, NY1 - NY0, 0.9), m_ladrillo)
+# Recercados de esquina alternando sillares (quoins)
+for sx in [-1, 1]:
+    for sy in [NY0, NY1]:
+        for k in range(6):
+            caja("EM_Quoin_" + str(sx) + "_" + str(sy) + "_" + str(k), (sx * NX1, sy, 0.6 + k * 1.0), (0.5, 0.3, 0.45), m_ladrillo)
+
+# Cubierta de la nave
+RIDGE = tejado_dos_aguas("EM_Nave", NX0, NX1, NY0, NY1, HW, 3.2, m_teja, m_ladrillo, volado=0.8)
+# Gablete de la fachada: triángulo de cal bajo el faldón
+for k in range(5):
+    z = HW + k * 0.64
+    w = (NX1 - NX0) * (1 - (z - HW) / 3.2)
+    caja("EM_Gablete_Cal_" + str(k), (0, NY0 - 0.05, z + 0.3), (w, 0.3, 0.7), m_cal)
+caja("EM_Gablete_Cornisa", (0, NY0 - 0.2, HW + 3.3), (6.6, 0.25, 0.3), m_ladrillo)
+cilindro("EM_Cruz_Poste", (0, NY0 - 0.1, RIDGE + 0.9), 0.05, 1.8, m_hierro, vertices=6)
+caja("EM_Cruz_Brazo", (0, NY0 - 0.1, RIDGE + 1.3), (0.9, 0.07, 0.07), m_hierro)
+caja("EM_Cruz_Brazo_Sup", (0, NY0 - 0.1, RIDGE + 1.6), (0.45, 0.07, 0.07), m_hierro)
+
+# Escudo cerámico en el gablete
+cilindro("EM_Escudo", (0, NY0 - 0.25, HW + 1.6), 0.55, 0.12, m_escudo, vertices=16, rot=(math.pi / 2, 0, 0))
+cilindro("EM_Escudo_Borde", (0, NY0 - 0.31, HW + 1.6), 0.62, 0.05, m_ladrillo, vertices=16, rot=(math.pi / 2, 0, 0))
+
+# ==========================================
+# 4. PORTADA DE LADRILLO CON REJA Y ABANICO
+# ==========================================
+arco_medio_punto("EM_Portada", 0, NY0 - 0.1, 0.0, 3.2, 4.0, m_madera, pasos=10, marco=m_ladrillo)
+# Reja de hierro: montantes y travesaños
+for sx in [-1, 1]:
+    for k in range(7):
+        caja("EM_Reja_Barrote_" + str(sx) + "_" + str(k), (sx * (0.2 + k * 0.25), NY0 - 0.32, 2.0), (0.03, 0.03, 3.8), m_hierro)
+for k in range(5):
+    caja("EM_Reja_Travesano_" + str(k), (0, NY0 - 0.32, 0.9 + k * 0.85), (3.0, 0.03, 0.03), m_hierro)
+# Abanico de hierro sobre la puerta (rayos radiales)
+for k in range(9):
+    a = math.radians(-80 + k * 20)
+    caja("EM_Abanico_" + str(k), (0.45 * math.cos(a), NY0 - 0.32, 4.1 + 0.45 * math.sin(a)), (0.03, 0.03, 0.9), m_hierro, rot=(0, a, 0))
+# Óculo de ladrillo con vidrio emplomado sobre el arco
+cilindro("EM_Oculo_Frente", (0, NY0 - 0.26, 5.6), 0.5, 0.15, m_ladrillo, vertices=16, rot=(math.pi / 2, 0, 0))
+cilindro("EM_Oculo_Vidrio", (0, NY0 - 0.33, 5.6), 0.36, 0.05, m_hierro, vertices=16, rot=(math.pi / 2, 0, 0))
+
+# ==========================================
+# 5. PORTADA GÓTICA DEL LADO DERECHO
+# ==========================================
+caja("EM_Portada_Lat_Fondo", (4.2, NY0 - 0.1, 1.9), (1.8, 0.3, 3.8), m_ladrillo)
+arco_medio_punto("EM_Portada_Lat", 4.2, NY0 - 0.14, 0.0, 1.6, 2.6, m_madera, pasos=6, marco=m_ladrillo)
+
+# Ventanas de arco con rejas en los muros laterales de la nave
+for sx in [-1, 1]:
+    for yy in [-5.0, -0.5, 4.0]:
+        x = sx * (NX1 + 0.02)
+        caja("EM_Vent_Marco_" + str(sx) + "_" + str(yy), (x, yy, 3.0), (0.2, 1.4, 2.0), m_ladrillo)
+        caja("EM_Vent_Hueco_" + str(sx) + "_" + str(yy), (x + sx * 0.03, yy, 3.0), (0.1, 1.1, 1.9), m_cristal)
+        for k in range(4):
+            caja("EM_Vent_Reja_" + str(sx) + "_" + str(yy) + "_" + str(k), (x + sx * 0.08, yy - 0.4 + k * 0.27, 3.0), (0.03, 0.03, 1.9), m_hierro)
+        caja("EM_Vent_Travesano_" + str(sx) + "_" + str(yy), (x + sx * 0.08, yy, 3.0), (0.03, 1.1, 0.03), m_hierro)
+        cilindro("EM_Vent_Arco_" + str(sx) + "_" + str(yy), (x, yy, 4.05), 0.7, 0.2, m_ladrillo, vertices=12, rot=(0, math.pi / 2, 0))
+
+# Faroles de forja en los muros
+for fa in [[NX1 + 0.4, -3.0, 3.6], [NX1 + 0.4, 3.0, 3.6], [NX0 - 0.4, -3.0, 3.6], [NX0 - 0.4, 3.0, 3.6]]:
+    x, y, z = fa[0], fa[1], fa[2]
+    caja("EM_Farol_Brazo_" + str(x) + "_" + str(y), (x, y, z), (0.7, 0.05, 0.05), m_farol)
+    caja("EM_Farol_Caja_" + str(x) + "_" + str(y), (x + 0.2, y, z - 0.3), (0.3, 0.25, 0.45), m_farol)
+    cono("EM_Farol_Techo_" + str(x) + "_" + str(y), (x + 0.2, y, z + 0.05), 0.22, 0.0, 0.25, m_farol, vertices=6)
+    caja("EM_Farol_Luz_" + str(x) + "_" + str(y), (x + 0.2, y, z - 0.3), (0.18, 0.12, 0.3), m_luz)
+
+# ==========================================
+# 6. ESPADAÑA DE DOS CAMPANAS (frente derecho)
+# ==========================================
+BX, BY = 4.6, -10.5
+caja("EM_Espadana_Cuerpo", (BX, BY, 5.0), (2.6, 2.6, 10.0), m_cal)
+for sx in [-1, 1]:
+    for sy in [-1, 1]:
+        caja("EM_Espadana_Esquina_" + str(sx) + "_" + str(sy), (BX + sx * 1.3, BY + sy * 1.3, 4.0), (0.35, 0.35, 8.0), m_ladrillo)
+for k in range(2):
+    caja("EM_Espadana_Cornisa_" + str(k), (BX, BY, 9.2 + k * 0.4), (2.9 - k * 0.2, 2.9 - k * 0.2, 0.25), m_ladrillo)
+for k in range(2):
+    xb = BX + (k * 2 - 1) * 0.55
+    arco_medio_punto("EM_Espadana_Vano_" + str(k), xb, BY - 1.33, 7.6, 0.8, 1.2, m_hueco, pasos=4, marco=m_ladrillo)
+    cilindro("EM_Yugo_" + str(k), (xb, BY - 1.5, 8.8), 0.02, 0.6, m_hierro, vertices=6, rot=(0, math.pi / 2, 0))
+    cono("EM_Campana_" + str(k), (xb, BY - 1.5, 8.7), 0.17, 0.1, 0.3, m_bronce, vertices=10)
+cono("EM_Espadana_Tejado", (BX, BY, 10.9), 1.8, 0.0, 1.6, m_teja, vertices=4, rot=(0, 0, math.pi / 4))
+cilindro("EM_Espadana_Cruz", (BX, BY, 12.2), 0.04, 1.0, m_hierro, vertices=6)
+caja("EM_Espadana_Cruz_Brazo", (BX, BY, 12.4), (0.5, 0.06, 0.06), m_hierro)
+
+# ==========================================
+# 7. TORRE OCTOGONAL CON ÓCULO Y CUBIERTA PIRAMIDAL
+# ==========================================
+OX, OY, OR = 10.5, 3.0, 3.6
+cilindro("EM_Torre_Octo_Muro", (OX, OY, 4.8), OR, 9.0, m_cal, vertices=8, rot=(0, 0, math.pi / 8))
+cilindro("EM_Torre_Octo_Friso", (OX, OY, 0.9), OR + 0.1, 0.35, m_ladrillo, vertices=8, rot=(0, 0, math.pi / 8))
+cilindro("EM_Torre_Octo_Cornisa", (OX, OY, 9.4), OR + 0.25, 0.4, m_ladrillo, vertices=8, rot=(0, 0, math.pi / 8))
+cilindro("EM_Torre_Oculo_Marco", (OX, OY - OR - 0.02, 6.2), 0.95, 0.2, m_ladrillo, vertices=16, rot=(math.pi / 2, 0, 0))
+cilindro("EM_Torre_Oculo_Vidrio", (OX, OY - OR - 0.1, 6.2), 0.7, 0.05, m_hierro, vertices=16, rot=(math.pi / 2, 0, 0))
+cono("EM_Torre_Octo_Tejado", (OX, OY, 11.0), OR + 0.8, 0.0, 4.0, m_teja, vertices=8, rot=(0, 0, math.pi / 8))
+cilindro("EM_Torre_Linterna", (OX, OY, 13.2), 0.7, 1.2, m_cal, vertices=8, rot=(0, 0, math.pi / 8))
+cono("EM_Torre_Linterna_Tejado", (OX, OY, 14.3), 0.9, 0.0, 0.9, m_teja, vertices=8, rot=(0, 0, math.pi / 8))
+cilindro("EM_Torre_Cruz", (OX, OY, 15.5), 0.03, 1.0, m_hierro, vertices=6)
+
+# ==========================================
+# 8. ALA IZQUIERDA (más baja, con tejado propio)
+# ==========================================
+LX0, LX1 = -15.0, -6.0
+LY0, LY1 = -5.0, 6.0
+HL = 4.2
+caja("EM_Ala_Izq_Muro", ((LX0 + LX1) / 2, (LY0 + LY1) / 2, HL / 2), (LX1 - LX0, LY1 - LY0, HL), m_cal)
+caja("EM_Ala_Izq_Zocalo", ((LX0 + LX1) / 2, LY0 - 0.02, 0.45), (LX1 - LX0, 0.2, 0.9), m_ladrillo)
+tejado_dos_aguas("EM_AlaIzq", LX0, LX1, LY0, LY1, HL, 2.2, m_teja, m_ladrillo, volado=0.7)
 for k in range(3):
-    caja("EM_Escalon_" + str(k), (0, -8.9 - k * 0.45, 0.3 + k * 0.12), (5.0 - k * 0.3, 0.5, 0.24 + k * 0.12), m_piedra)
+    xx = LX0 + 1.4 + k * 2.8
+    caja("EM_Ala_Vent_Marco_" + str(k), (xx, LY0 - 0.02, 2.2), (1.4, 0.2, 1.9), m_ladrillo)
+    caja("EM_Ala_Vent_Hueco_" + str(k), (xx, LY0 - 0.1, 2.2), (1.0, 0.1, 1.6), m_cristal)
+    for j in range(3):
+        caja("EM_Ala_Vent_Reja_" + str(k) + "_" + str(j), (xx - 0.3 + j * 0.3, LY0 - 0.14, 2.2), (0.03, 0.03, 1.6), m_hierro)
+    cilindro("EM_Ala_Vent_Arco_" + str(k), (xx, LY0 - 0.08, 3.1), 0.5, 0.15, m_ladrillo, vertices=12, rot=(math.pi / 2, 0, 0))
 
 # ==========================================
-# 3. NAVE: MUROS DE CAL CON CONTRAFUERTES
+# 9. ESCALERAS, MACETAS Y DETALLES DE PLAZA
 # ==========================================
-W, L, H = 8.0, 16.0, 7.0
-caja("EM_Nave_Muro", (0, 0, H / 2 + 0.5), (W, L, H), m_cal)
 for sx in [-1, 1]:
-    for yy in [-5.0, 0.0, 5.0]:
-        caja("EM_Contrafuerte_" + str(sx) + "_" + str(yy), (sx * (W / 2 + 0.35), yy, 2.6), (0.7, 1.2, 5.0), m_cal)
-        caja("EM_Contrafuerte_Remate_" + str(sx) + "_" + str(yy), (sx * (W / 2 + 0.35), yy, 5.3), (0.85, 1.35, 0.25), m_piedra)
-    # Hiladas de ladrillo en las esquinas (sillares de quoin)
-    for k in range(5):
-        caja("EM_Esquina_" + str(sx) + "_" + str(k), (sx * (W / 2 + 0.02), -L / 2 - 0.02, 0.9 + k * 1.2), (0.55, 0.22, 0.5), m_ladrillo)
-        caja("EM_Esquina_Tras_" + str(sx) + "_" + str(k), (sx * (W / 2 + 0.02), L / 2 + 0.02, 0.9 + k * 1.2), (0.55, 0.22, 0.5), m_ladrillo)
-# Friso de azulejo bajo la cornisa en ambos laterales
-for sx in [-1, 1]:
-    caja("EM_Friso_Azulejo_" + str(sx), (sx * (W / 2 + 0.03), 0, 6.2), (0.1, L - 1.6, 0.5), m_azulejo)
-# Cornisa de piedra
-caja("EM_Cornisa_Lateral_I", (-W / 2 - 0.2, 0, H + 0.5), (0.45, L + 0.4, 0.35), m_piedra)
-caja("EM_Cornisa_Lateral_D", (W / 2 + 0.2, 0, H + 0.5), (0.45, L + 0.4, 0.35), m_piedra)
-
-# Ventanas de la nave con rejas
-for sx in [-1, 1]:
-    for yy in [-4.5, -0.5, 3.5]:
-        caja("EM_Ventana_Hueco_" + str(sx) + "_" + str(yy), (sx * (W / 2 + 0.02), yy, 3.9), (0.1, 1.0, 2.0), m_hueco)
-        caja("EM_Ventana_Marco_" + str(sx) + "_" + str(yy), (sx * (W / 2 + 0.07), yy, 3.9), (0.12, 1.3, 2.3), m_piedra)
-        caja("EM_Reja_Vertical_" + str(sx) + "_" + str(yy), (sx * (W / 2 + 0.12), yy, 3.9), (0.04, 0.9, 1.8), m_hierro)
-        for k in range(5):
-            caja("EM_Reja_Barra_" + str(sx) + "_" + str(yy) + "_" + str(k), (sx * (W / 2 + 0.13), yy - 0.4 + k * 0.2, 3.9), (0.03, 0.03, 1.9), m_hierro)
-        caja("EM_Reja_Travesano_" + str(sx) + "_" + str(yy), (sx * (W / 2 + 0.13), yy, 3.9), (0.03, 1.0, 0.04), m_hierro)
-
-# ==========================================
-# 4. CUBIERTA DE TEJA A DOS AGUAS
-# ==========================================
-TH = math.radians(30)
-RIDGE_Z = H + 3.5
-for sx in [-1, 1]:
-    xc = sx * 2.2
-    zc = RIDGE_Z - 2.2 * math.tan(TH) - 0.15
-    caja("EM_Faldon_" + str(sx), (xc, 0, zc), (4.9, L + 0.8, 0.28), m_teja, rot=(0, -sx * TH, 0))
-    # Hileras de tejas (canales) en el faldón
-    for k in range(10):
-        yy = -L / 2 + 0.4 + k * (L - 0.8) / 9
-        caja("EM_Teja_Canal_" + str(sx) + "_" + str(k), (xc, yy, zc + 0.22), (4.9, 0.12, 0.06), m_teja, rot=(0, -sx * TH, 0))
-caja("EM_Cumbrera", (0, 0, RIDGE_Z + 0.1), (0.5, L + 0.9, 0.22), m_teja)
-# Aleros de madera
-for sx in [-1, 1]:
-    caja("EM_Alero_Lateral_" + str(sx), (sx * (W / 2 + 0.7), 0, H + 0.4), (1.0, L + 1.0, 0.12), m_madera)
-
-# ==========================================
-# 5. FACHADA: PORTADA DE LADRILLO MUDÉJAR Y ESPADAÑA
-# ==========================================
-FY = -L / 2
-# Portada con arco de medio punto de ladrillo y dintel de piedra
-caja("EM_Portada_Fondo", (0, FY - 0.05, 2.7), (3.4, 0.25, 4.0), m_ladrillo)
-arco_escalonado("EM_Portada_Vano", 0, FY - 0.12, 0.5, 2.2, 3.0, m_madera, pasos=8, marco=m_ladrillo)
-caja("EM_Portada_Dintel", (0, FY - 0.25, 4.8), (2.8, 0.35, 0.25), m_piedra)
-# Puerta de dos hojas con clavos de hierro
-for sx in [-1, 1]:
-    caja("EM_Puerta_Hoja_" + str(sx), (sx * 0.55, FY - 0.25, 2.2), (1.0, 0.1, 3.0), m_madera)
-    for k in range(4):
-        esfera("EM_Clavo_" + str(sx) + "_" + str(k), (sx * 0.55 + 0.25 * sx * 0.0, FY - 0.32, 1.1 + k * 0.7), 0.045, m_hierro)
-    caja("EM_Refuerzo_Hierro_" + str(sx), (sx * 0.55, FY - 0.31, 2.4), (0.9, 0.05, 0.08), m_hierro)
-esfera("EM_Aldaba", (0.05, FY - 0.34, 2.0), 0.07, m_hierro)
-# Pilastras de ladrillo a los lados de la portada
-for sx in [-1, 1]:
-    caja("EM_Pilastra_Ladrillo_" + str(sx), (sx * 2.2, FY - 0.15, 2.4), (0.6, 0.5, 4.8), m_ladrillo)
-    caja("EM_Pilastra_Capitel_" + str(sx), (sx * 2.2, FY - 0.15, 4.95), (0.8, 0.6, 0.3), m_piedra)
-
-# Espadaña de dos campanas sobre la fachada
-EY = FY - 0.15
-caja("EM_Espadana_Cuerpo", (0, EY, H + 1.4), (2.4, 0.6, 3.9), m_cal)
-for sx in [-1, 1]:
-    cono("EM_Espadana_Pinaculo_" + str(sx), (sx * 1.1, EY, H + 3.5), 0.22, 0.0, 0.9, m_piedra, vertices=6)
-caja("EM_Espadana_Cornisa", (0, EY - 0.05, H + 2.8), (3.1, 0.7, 0.3), m_piedra)
-caja("EM_Espadana_Remate", (0, EY - 0.05, H + 3.2), (2.0, 0.6, 0.25), m_piedra)
-for sx in [-0.6, 0.6]:
-    arco_escalonado("EM_Espadana_Vano_" + str(sx), sx, EY - 0.33, H + 0.9, 0.8, 1.5, m_hueco, pasos=4, marco=m_piedra)
-    # Campana de bronce colgada con su yugo de hierro
-    cilindro("EM_Yugo_" + str(sx), (sx, EY - 0.36, H + 2.3), 0.02, 0.7, m_hierro, vertices=6, rot=(0, math.pi / 2, 0))
-    cono("EM_Campana_" + str(sx), (sx, EY - 0.36, H + 2.15), 0.18, 0.1, 0.3, m_bronce, vertices=12)
-    cilindro("EM_Campana_Badajo_" + str(sx), (sx, EY - 0.36, H + 1.98), 0.015, 0.12, m_hierro, vertices=6)
-    cilindro("EM_Campana_Asa_" + str(sx), (sx, EY - 0.36, H + 2.33), 0.03, 0.04, m_hierro, vertices=6)
-# Cruz de forja en el remate
-cilindro("EM_Cruz_Poste", (0, EY - 0.05, H + 4.5), 0.04, 1.0, m_hierro, vertices=6)
-caja("EM_Cruz_Brazo", (0, EY - 0.05, H + 4.7), (0.5, 0.06, 0.06), m_hierro)
-
-# ==========================================
-# 6. CABECERA OCHAVADA (ábside) CON TEJADO CÓNICO
-# ==========================================
-AY = L / 2 + 0.2
-cilindro("EM_Cabecera_Muro", (0, AY, 3.8), 3.8, 6.6, m_cal, vertices=8, rot=(0, 0, math.pi / 8))
-cilindro("EM_Cabecera_Friso", (0, AY, 6.0), 3.9, 0.35, m_azulejo, vertices=8, rot=(0, 0, math.pi / 8))
-cilindro("EM_Cabecera_Cornisa", (0, AY, 7.25), 4.0, 0.3, m_piedra, vertices=8, rot=(0, 0, math.pi / 8))
-cono("EM_Cabecera_Tejado", (0, AY, 9.1), 4.2, 0.0, 3.6, m_teja, vertices=8, rot=(0, 0, math.pi / 8))
-cilindro("EM_Cabecera_Linterna", (0, AY, 11.2), 0.2, 0.5, m_hierro, vertices=6)
-# Ventanas ojivales de vidrio emplomado en el ábside
+    caja("EM_Banco_Plaza_" + str(sx), (sx * 9.0, -12.0, 0.4), (3.0, 0.7, 0.4), m_piedra)
 for k in range(3):
-    a = math.radians(-60 + k * 60)
-    px, py = 3.85 * math.cos(a), AY + 3.85 * math.sin(a)
-    caja("EM_Ventana_Abside_" + str(k), (px, py, 4.2), (0.2, 0.9, 2.6), m_cristal, rot=(0, 0, a))
-    caja("EM_Ventana_Abside_Marco_" + str(k), (px * 1.01, py * 1.0, 4.2), (0.25, 1.0, 2.8), m_piedra, rot=(0, 0, a))
+    cilindro("EM_Maceta_" + str(k), (-3.0 + k * 3.0, -12.8, 0.35), 0.4, 0.7, m_teja, vertices=10)
 
-# ==========================================
-# 7. PATIO, CIPRESES Y MURO BAJO
-# ==========================================
-# Muro bajo del patio, con hueco de entrada en el centro
-for sx in [-1, 1]:
-    caja("EM_Muro_Bajo_Frente_" + str(sx), (sx * 7.25, -17.5, 0.8), (11.5, 0.45, 1.6), m_cal)
-    caja("EM_Muro_Coronacion_Frente_" + str(sx), (sx * 7.25, -17.5, 1.7), (11.6, 0.55, 0.14), m_piedra)
-for sx in [-1, 1]:
-    caja("EM_Muro_Bajo_Lateral_" + str(sx), (sx * 13.0, -12.0, 0.8), (0.45, 11.0, 1.6), m_cal)
-    caja("EM_Muro_Coronacion_" + str(sx), (sx * 13.0, -12.0, 1.7), (0.55, 11.0, 0.14), m_piedra)
-for sx in [-1, 1]:
-    for yy in [-6.0, -17.0]:
-        cono("EM_Cipres_" + str(sx) + "_" + str(yy), (sx * 9.8, yy, 4.6), 0.85, 0.0, 6.0, m_cipres, vertices=8)
-        cono("EM_Cipres_Copa_" + str(sx) + "_" + str(yy), (sx * 9.8, yy, 7.9), 0.55, 0.0, 2.2, m_cipres, vertices=8)
-        cilindro("EM_Cipres_Tronco_" + str(sx) + "_" + str(yy), (sx * 9.8, yy, 0.6), 0.08, 1.2, m_tronco, vertices=6)
-# Farolas de la portada
-for sx in [-1, 1]:
-    cilindro("EM_Farol_Poste_" + str(sx), (sx * 3.3, FY - 2.2, 1.6), 0.06, 3.2, m_hierro, vertices=6)
-    caja("EM_Farol_Caja_" + str(sx), (sx * 3.3, FY - 2.2, 3.4), (0.35, 0.35, 0.4), m_hierro)
-    esfera("EM_Farol_Luz_" + str(sx), (sx * 3.3, FY - 2.2, 3.4), 0.12, m_piedra)
-
-
-# Canecillos (soportes de madera/piedra) bajo los aleros laterales
-for sx in [-1, 1]:
-    for k in range(11):
-        yy = -L / 2 + 0.8 + k * (L - 1.6) / 10
-        caja("EM_Canecillo_" + str(sx) + "_" + str(k), (sx * (W / 2 + 0.55), yy, H - 0.05), (0.35, 0.16, 0.45), m_madera)
-
-# Hornacina con imagen de la Virgen sobre la portada y panel de azulejo
-caja("EM_Hornacina_Marco", (0, FY - 0.2, 6.1), (1.8, 0.4, 2.0), m_piedra)
-caja("EM_Hornacina_Hueco", (0, FY - 0.36, 6.1), (1.2, 0.2, 1.6), m_hueco)
-esfera("EM_Imagen_Cabeza", (0, FY - 0.44, 6.7), 0.16, m_piedra)
-caja("EM_Imagen_Cuerpo", (0, FY - 0.44, 6.1), (0.4, 0.2, 0.9), m_piedra)
-caja("EM_Panel_Azulejo", (0, FY - 0.22, 7.3), (2.2, 0.1, 0.6), m_azulejo)
-
-# Patio: bancos de piedra, pilón de agua y macetas de cerámica con plantas
-for sx in [-1, 1]:
-    caja("EM_Banco_Patio_" + str(sx), (sx * 5.2, -13.0, 0.55), (3.0, 0.6, 0.5), m_piedra)
-    caja("EM_Banco_Patio_Respaldo_" + str(sx), (sx * 5.2, -13.45, 1.0), (3.0, 0.1, 0.5), m_piedra)
-cilindro("EM_Pilon_Base", (-5.8, -9.5, 0.4), 0.9, 0.7, m_piedra, vertices=12)
-cilindro("EM_Pilon_Agua", (-5.8, -9.5, 0.72), 0.75, 0.05, m_azulejo, vertices=12)
-cilindro("EM_Pilon_Columna", (-5.8, -9.5, 1.2), 0.12, 0.9, m_piedra, vertices=8)
-cilindro("EM_Pilon_Caño", (-5.8, -9.5, 1.7), 0.09, 0.2, m_bronce, vertices=8)
-for sx in [-1, 1]:
-    for k in range(2):
-        cilindro("EM_Maceta_" + str(sx) + "_" + str(k), (sx * (1.8 + k * 0.5), FY - 1.2, 0.25), 0.22, 0.5, m_teja, vertices=10)
-        esfera("EM_Planta_" + str(sx) + "_" + str(k), (sx * (1.8 + k * 0.5), FY - 1.2, 0.75), 0.25, m_cipres, escala=(1.0, 1.0, 0.8))
-        esfera("EM_Flor_" + str(sx) + "_" + str(k), (sx * (1.8 + k * 0.5) + 0.08, FY - 1.25, 0.95), 0.05, m_azulejo)
-
-print("Ermita de Montemayor generada")
+print("Ermita de Montemayor v2 generada")
