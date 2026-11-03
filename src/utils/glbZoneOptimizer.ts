@@ -409,86 +409,153 @@ async function reduceTriangles(json: Json, views: Uint8Array[], ratio: number, a
   const blocked = (json.extensionsUsed || []).filter((e: string) => e === 'KHR_draco_mesh_compression' || e === 'EXT_meshopt_compression');
   if (blocked.length) { notes.push(`No se pueden reducir triángulos: la geometría viene comprimida (${blocked.join(', ')}).`); return; }
   await MeshoptSimplifier.ready;
-  let before = 0, after = 0;
-  const done = new Map<string, Json>(); // primitivas que comparten accesores se procesan una vez
+
+  // 1. Reunir las primitivas (las que comparten accesores se procesan una vez)
+  interface Cand { p: Json; key: string; vcount: number; local: Uint32Array; remap0: Uint32Array; unique0: number; pos: Float32Array; tris: number; simp?: Uint32Array }
+  const cands: Cand[] = [];
+  const aliases: { p: Json; key: string }[] = [];
+  const seen = new Set<string>();
+  let before = 0, fixed = 0;
   for (const m of json.meshes || []) {
     for (const p of m.primitives || []) {
       if ((p.mode ?? 4) !== 4 || p.attributes?.POSITION === undefined) continue;
       const accIdx = [p.attributes.POSITION, ...Object.values(p.attributes), ...(p.targets || []).flatMap((t: Json) => Object.values(t))] as number[];
       if (accIdx.some((i) => json.accessors[i].sparse)) continue;
       const key = JSON.stringify([p.indices, p.attributes, p.targets]);
-      const prev = done.get(key);
-      if (prev) { p.indices = prev.indices; p.attributes = { ...prev.attributes }; if (prev.targets) p.targets = prev.targets.map((t: Json) => ({ ...t })); continue; }
-
-      const posAcc = json.accessors[p.attributes.POSITION];
-      const vcount = posAcc.count;
+      if (seen.has(key)) { aliases.push({ p, key }); continue; }
+      seen.add(key);
+      const vcount = json.accessors[p.attributes.POSITION].count;
       let indices: Uint32Array;
       if (p.indices !== undefined) indices = Uint32Array.from(readAccessor(json, views, p.indices).data);
       else { indices = new Uint32Array(vcount); for (let i = 0; i < vcount; i++) indices[i] = i; }
       indices = indices.subarray(0, indices.length - (indices.length % 3));
-      const triCount = indices.length / 3;
-      before += triCount;
-      if (triCount < 16) { after += triCount; continue; } // piezas diminutas: no merece la pena
-
-      // Vértices propios de esta primitiva
+      const tris = indices.length / 3;
+      before += tris;
+      if (tris < 16) { fixed += tris; continue; } // piezas diminutas: no merece la pena
       const local = indices.slice();
       const [remap0, unique0] = MeshoptSimplifier.compactMesh(local);
       const allPos = readAccessor(json, views, p.attributes.POSITION).data;
       const pos = new Float32Array(unique0 * 3);
       for (let v = 0; v < vcount; v++) { const r = remap0[v]; if (r !== 0xffffffff && r < unique0) { pos[r * 3] = allPos[v * 3]; pos[r * 3 + 1] = allPos[v * 3 + 1]; pos[r * 3 + 2] = allPos[v * 3 + 2]; } }
-
-      const target = Math.max(12, Math.floor((triCount * ratio)) * 3);
-      let [simp] = MeshoptSimplifier.simplify(local, pos, 3, target, 0.01);
-      // Si con poco error no llega al objetivo, se permite algo más de desviación
-      for (const err of [0.03, 0.08]) {
-        if (simp.length <= target * 1.1) break;
-        [simp] = MeshoptSimplifier.simplify(local, pos, 3, target, err);
-      }
-      if (simp.length >= local.length) { after += triCount; continue; }
-
-      // Compactar: solo quedan los vértices que usa la malla simplificada
-      const finalIdx = simp.slice();
-      const [remap1, unique1] = MeshoptSimplifier.compactMesh(finalIdx);
-      const order = new Uint32Array(unique1); // nuevo índice -> vértice original
-      for (let v = 0; v < vcount; v++) {
-        const r0 = remap0[v];
-        if (r0 === 0xffffffff || r0 >= unique0) continue;
-        const r1 = remap1[r0];
-        if (r1 !== 0xffffffff && r1 < unique1) order[r1] = v;
-      }
-
-      const rewrite = (accIndex: number, withBounds: boolean): number => {
-        const old = json.accessors[accIndex];
-        const { bytes, stride } = gatherAccessor(json, views, accIndex, order);
-        const elem = TYPE_COUNT[old.type] * COMPONENT_SIZE[old.componentType];
-        const view = addView(bytes, 34962);
-        if (stride !== elem) json.bufferViews[view].byteStride = stride;
-        const acc: Json = { bufferView: view, componentType: old.componentType, count: unique1, type: old.type };
-        if (old.normalized) acc.normalized = true;
-        if (old.name) acc.name = old.name;
-        if (withBounds && old.componentType === 5126) {
-          const comps = TYPE_COUNT[old.type];
-          const f = new Float32Array(unique1 * comps);
-          const dv = new DataView(bytes.buffer);
-          for (let i = 0; i < unique1; i++) for (let c = 0; c < comps; c++) f[i * comps + c] = dv.getFloat32(i * stride + c * 4, true);
-          Object.assign(acc, minMax(f, comps));
-        }
-        json.accessors.push(acc);
-        return json.accessors.length - 1;
-      };
-      const newAttrs: Json = {};
-      for (const [sem, a] of Object.entries(p.attributes) as [string, number][]) newAttrs[sem] = rewrite(a, sem === 'POSITION');
-      p.attributes = newAttrs;
-      if (p.targets) p.targets = p.targets.map((t: Json) => Object.fromEntries(Object.entries(t).map(([sem, a]) => [sem, rewrite(a as number, sem === 'POSITION')])));
-      const idxData = unique1 < 65536 ? new Uint16Array(finalIdx) : new Uint32Array(finalIdx);
-      json.accessors.push({ bufferView: addView(new Uint8Array(idxData.buffer), 34963), componentType: unique1 < 65536 ? 5123 : 5125, count: finalIdx.length, type: 'SCALAR' });
-      p.indices = json.accessors.length - 1;
-      done.set(key, p);
-      after += finalIdx.length / 3;
+      cands.push({ p, key, vcount, local, remap0, unique0, pos, tris });
     }
   }
+  if (!cands.length) return;
+
+  // 2. Un mismo error máximo (en unidades del modelo) para todas las piezas: las zonas densas pierden
+  //    muchos triángulos y las finas (cuernos, colas, dientes) casi ninguno, porque aplanarlas costaría más.
+  let scale = 0;
+  for (const c of cands) {
+    const { min, max } = minMax(c.pos, 3);
+    scale = Math.max(scale, Math.hypot(max[0] - min[0], max[1] - min[1], max[2] - min[2]));
+  }
+  const goal = Math.floor(before * ratio);
+  const run = (err: number): number => {
+    let total = fixed;
+    for (const c of cands) {
+      const floor = Math.max(4, Math.floor(c.tris * 0.04)) * 3;
+      const [out] = MeshoptSimplifier.simplify(c.local, c.pos, 3, Math.min(floor, c.local.length), err, ['ErrorAbsolute']);
+      c.simp = out;
+      total += out.length / 3;
+    }
+    return total;
+  };
+  const maxErr = 0.025 * scale;
+  let after = run(maxErr);
+  if (after <= goal) {
+    let lo = 0, hi = maxErr;
+    for (let i = 0; i < 14; i++) {
+      const mid = (lo + hi) / 2;
+      if (run(mid) <= goal) hi = mid; else lo = mid;
+    }
+    after = run(hi);
+  } else {
+    notes.push('No se llega al objetivo sin deformar las partes finas: se queda algo por encima.');
+  }
+
+  // 3. Escribir cada primitiva simplificada con solo los vértices que usa
+  const results = new Map<string, Json>();
+  after = fixed;
+  for (const c of cands) {
+    const p = c.p;
+    const simp = c.simp!;
+    if (simp.length >= c.local.length) { after += c.tris; continue; }
+    const finalIdx = simp.slice();
+    const [remap1, unique1] = MeshoptSimplifier.compactMesh(finalIdx);
+    const order = new Uint32Array(unique1); // nuevo índice -> vértice original
+    for (let v = 0; v < c.vcount; v++) {
+      const r0 = c.remap0[v];
+      if (r0 === 0xffffffff || r0 >= c.unique0) continue;
+      const r1 = remap1[r0];
+      if (r1 !== 0xffffffff && r1 < unique1) order[r1] = v;
+    }
+    const rewrite = (accIndex: number, withBounds: boolean): number => {
+      const old = json.accessors[accIndex];
+      const { bytes, stride } = gatherAccessor(json, views, accIndex, order);
+      const elem = TYPE_COUNT[old.type] * COMPONENT_SIZE[old.componentType];
+      const view = addView(bytes, 34962);
+      if (stride !== elem) json.bufferViews[view].byteStride = stride;
+      const acc: Json = { bufferView: view, componentType: old.componentType, count: unique1, type: old.type };
+      if (old.normalized) acc.normalized = true;
+      if (old.name) acc.name = old.name;
+      if (withBounds && old.componentType === 5126) {
+        const comps = TYPE_COUNT[old.type];
+        const f = new Float32Array(unique1 * comps);
+        const dv = new DataView(bytes.buffer);
+        for (let i = 0; i < unique1; i++) for (let k = 0; k < comps; k++) f[i * comps + k] = dv.getFloat32(i * stride + k * 4, true);
+        Object.assign(acc, minMax(f, comps));
+      }
+      json.accessors.push(acc);
+      return json.accessors.length - 1;
+    };
+    const newAttrs: Json = {};
+    for (const [sem, a] of Object.entries(p.attributes) as [string, number][]) newAttrs[sem] = rewrite(a, sem === 'POSITION');
+    p.attributes = newAttrs;
+    if (p.targets) p.targets = p.targets.map((t: Json) => Object.fromEntries(Object.entries(t).map(([sem, a]) => [sem, rewrite(a as number, sem === 'POSITION')])));
+    const idxData = unique1 < 65536 ? new Uint16Array(finalIdx) : new Uint32Array(finalIdx);
+    json.accessors.push({ bufferView: addView(new Uint8Array(idxData.buffer), 34963), componentType: unique1 < 65536 ? 5123 : 5125, count: finalIdx.length, type: 'SCALAR' });
+    p.indices = json.accessors.length - 1;
+    results.set(c.key, p);
+    after += finalIdx.length / 3;
+  }
+  for (const { p, key } of aliases) {
+    const r = results.get(key);
+    if (r) { p.indices = r.indices; p.attributes = { ...r.attributes }; if (r.targets) p.targets = r.targets.map((t: Json) => ({ ...t })); }
+  }
   pruneAccessors(json);
-  if (before) notes.push(`Triángulos: ${before.toLocaleString()} → ${after.toLocaleString()} (${Math.round((after / before) * 100)} %). Huesos y pesos de cada vértice conservados.`);
+  notes.push(`Triángulos: ${before.toLocaleString()} → ${after.toLocaleString()} (${Math.round((after / before) * 100)} %). Huesos y pesos de cada vértice conservados.`);
+}
+
+/** Al poner un patrón, la superficie nueva sustituye a la anterior: relieve, rugosidad y brillo del patrón. */
+function applyPatternSurface(mat: Json, pattern: TexturePatternType): void {
+  const pbrInfo = getTexturePresetInfo(pattern).pbr;
+  const pbr = (mat.pbrMetallicRoughness = mat.pbrMetallicRoughness || {});
+  pbr.metallicFactor = pbrInfo.metalness;
+  pbr.roughnessFactor = pbrInfo.roughness;
+  delete pbr.metallicRoughnessTexture;
+  delete mat.normalTexture;
+  // Pelo y plumas: si el color visible venía casi todo del brillo "sheen" sobre una base oscura,
+  // se pasa parte de ese color a la base para que el patrón se vea, manteniendo el tono general.
+  const sheen = mat.extensions?.KHR_materials_sheen;
+  if (sheen && (pattern === 'animal_fur' || pattern === 'feathers') && !sheen.sheenColorTexture) {
+    const sc: number[] = sheen.sheenColorFactor || [0, 0, 0];
+    const base: number[] = pbr.baseColorFactor || [1, 1, 1, 1];
+    const lum = (c: number[]) => 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+    if (lum(sc) > lum(base) * 1.5) {
+      // mismo tono que la base, más claro (sin pasar de 1 en ningún canal)
+      const maxC = Math.max(base[0], base[1], base[2], 1e-4);
+      const k = Math.min((lum(sc) * 0.45) / Math.max(lum(base), 1e-4), 1 / maxC, 12);
+      pbr.baseColorFactor = [base[0] * k, base[1] * k, base[2] * k, base[3] ?? 1];
+      sheen.sheenColorFactor = sc.map((c) => c * 0.4);
+    }
+  }
+  if (mat.extensions) {
+    delete mat.extensions.KHR_materials_anisotropy;
+    if (pbrInfo.clearcoat < 0.05) delete mat.extensions.KHR_materials_clearcoat;
+    else mat.extensions.KHR_materials_clearcoat = { clearcoatFactor: pbrInfo.clearcoat, clearcoatRoughnessFactor: 0.35 };
+  } else if (pbrInfo.clearcoat >= 0.05) {
+    mat.extensions = { KHR_materials_clearcoat: { clearcoatFactor: pbrInfo.clearcoat, clearcoatRoughnessFactor: 0.35 } };
+  }
 }
 
 export async function optimizeGlb(
@@ -547,6 +614,10 @@ export async function optimizeGlb(
     const cacheKey = choice.kind === 'pattern' ? `p:${choice.pattern}:${choice.natural ? 1 : 0}` : `u:${choice.id}`;
     const repeat = choice.repeat;
     const cached = sharedTextures.get(cacheKey);
+    if (choice.kind === 'pattern') {
+      applyPatternSurface(mat, choice.pattern);
+      if (mat.extensions?.KHR_materials_clearcoat) useExt('KHR_materials_clearcoat');
+    }
     if (cached) {
       if (choice.kind === 'user' || choice.natural) pbr.baseColorFactor = [1, 1, 1, (pbr.baseColorFactor || [1, 1, 1, 1])[3]];
       pbr.baseColorTexture = { index: cached.color, texCoord: 0, extensions: { KHR_texture_transform: { scale: [repeat, repeat] } } };
@@ -761,6 +832,22 @@ export async function optimizeGlb(
   json.bufferViews = keptViewJson;
   views.length = 0;
   views.push(...keptViewBytes);
+
+  // Extensiones declaradas que ya no usa nadie (p. ej. anisotropía de un patrón sustituido)
+  const extNames = new Set<string>();
+  const findExt = (node: Json) => {
+    if (!node || typeof node !== 'object') return;
+    if (node.extensions && typeof node.extensions === 'object') for (const k of Object.keys(node.extensions)) extNames.add(k);
+    for (const v of Object.values(node)) if (v && typeof v === 'object') findExt(v);
+  };
+  for (const [k, v] of Object.entries(json)) if (k !== 'extensionsUsed' && k !== 'extensionsRequired') findExt(v);
+  if (json.extensions) for (const k of Object.keys(json.extensions)) extNames.add(k);
+  json.extensionsUsed = (json.extensionsUsed || []).filter((e: string) => extNames.has(e));
+  if (!json.extensionsUsed.length) delete json.extensionsUsed;
+  if (json.extensionsRequired) {
+    json.extensionsRequired = json.extensionsRequired.filter((e: string) => extNames.has(e));
+    if (!json.extensionsRequired.length) delete json.extensionsRequired;
+  }
 
   // 6. Reconstruir el buffer binario
   let total = 0;

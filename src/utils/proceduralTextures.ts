@@ -35,6 +35,11 @@ export type TexturePatternType =
   | 'royal_velvet'
   | 'woven_linen'
   | 'beast_hide'
+  // Animales y monstruos
+  | 'animal_fur'
+  | 'feathers'
+  | 'bone_ivory'
+  | 'chitin_carapace'
   // Fantasía, Sci-Fi y Anime
   | 'dragon_scales'
   | 'biomech_plates'
@@ -545,6 +550,39 @@ export const TEXTURE_PRESETS: TexturePresetInfo[] = [
     },
   },
 
+  {
+    id: 'animal_fur',
+    name: 'Pelaje Animal',
+    category: 'natural',
+    description: 'Mechones de pelo direccionales con volumen, sin costuras: lobos, osos, jabalíes, felinos',
+    thumbnailColor: '#7a6248',
+    pbr: { naturalColorHex: '#7a6248', roughness: 0.9, metalness: 0.0, clearcoat: 0.0, ior: 1.45, bumpScale: 0.03 },
+  },
+  {
+    id: 'feathers',
+    name: 'Plumas',
+    category: 'natural',
+    description: 'Plumas solapadas con raquis y barbas: aves, grifos, arpías, fénix',
+    thumbnailColor: '#8a6a44',
+    pbr: { naturalColorHex: '#8a6a44', roughness: 0.75, metalness: 0.0, clearcoat: 0.0, ior: 1.45, bumpScale: 0.025 },
+  },
+  {
+    id: 'bone_ivory',
+    name: 'Hueso / Marfil',
+    category: 'natural',
+    description: 'Hueso con vetas longitudinales, poros y grietas finas: esqueletos, cuernos, colmillos, garras',
+    thumbnailColor: '#e8dcc0',
+    pbr: { naturalColorHex: '#e3d6b8', roughness: 0.55, metalness: 0.0, clearcoat: 0.1, ior: 1.5, bumpScale: 0.02 },
+  },
+  {
+    id: 'chitin_carapace',
+    name: 'Quitina / Caparazón',
+    category: 'natural',
+    description: 'Placas segmentadas brillantes con poros y moteado: arañas, escorpiones, escarabajos, cangrejos',
+    thumbnailColor: '#3a2a22',
+    pbr: { naturalColorHex: '#4a3326', roughness: 0.32, metalness: 0.05, clearcoat: 0.6, ior: 1.52, bumpScale: 0.04 },
+  },
+
   // === 4. FANTASÍA, SCI-FI Y ESTILIZADO ===
   {
     id: 'dragon_scales',
@@ -706,6 +744,10 @@ const TEXTURE_ALIAS_MAP: Record<string, TexturePatternType> = {
   royal_velvet: 'royal_velvet',
   woven_linen: 'woven_linen',
   beast_hide: 'beast_hide',
+  animal_fur: 'animal_fur',
+  feathers: 'feathers',
+  bone_ivory: 'bone_ivory',
+  chitin_carapace: 'chitin_carapace',
   dragon_scales: 'dragon_scales',
   biomech_plates: 'biomech_plates',
   magma_cracks: 'magma_cracks',
@@ -820,6 +862,18 @@ const TEXTURE_ALIAS_MAP: Record<string, TexturePatternType> = {
   piel_bestia: 'beast_hide',
   cuero_granulado: 'beast_hide',
   hide: 'beast_hide',
+  pelaje: 'animal_fur',
+  pelo: 'animal_fur',
+  fur: 'animal_fur',
+  plumas: 'feathers',
+  pluma: 'feathers',
+  feather: 'feathers',
+  hueso: 'bone_ivory',
+  marfil: 'bone_ivory',
+  bone: 'bone_ivory',
+  quitina: 'chitin_carapace',
+  caparazon: 'chitin_carapace',
+  chitin: 'chitin_carapace',
 };
 
 export function resolveTexturePatternId(rawName: string): TexturePatternType {
@@ -938,6 +992,37 @@ function voronoi2D(x: number, y: number, scale: number, seed: number = 42): { f1
     }
   }
   return { f1, f2, cellHash: bestHash };
+}
+
+// Ruido suave periódico: se repite exactamente en u,v ∈ [0,1) (periodos enteros), así la textura no tiene costuras
+function periodicNoise2D(u: number, v: number, px: number, py: number, seed: number): number {
+  const x = u * px;
+  const y = v * py;
+  const ix = Math.floor(x);
+  const iy = Math.floor(y);
+  const fx = x - ix;
+  const fy = y - iy;
+  const sx = fx * fx * (3 - 2 * fx);
+  const sy = fy * fy * (3 - 2 * fy);
+  const wx = (n: number) => ((n % px) + px) % px;
+  const wy = (n: number) => ((n % py) + py) % py;
+  const a = hash2D(wx(ix), wy(iy), seed);
+  const b = hash2D(wx(ix + 1), wy(iy), seed);
+  const c = hash2D(wx(ix), wy(iy + 1), seed);
+  const d = hash2D(wx(ix + 1), wy(iy + 1), seed);
+  return a + (b - a) * sx + (c - a) * sy + (a - b - c + d) * sx * sy;
+}
+
+function periodicFbm(u: number, v: number, px: number, py: number, octaves: number, seed: number): number {
+  let val = 0;
+  let amp = 0.5;
+  let norm = 0;
+  for (let i = 0; i < octaves; i++) {
+    val += amp * periodicNoise2D(u, v, px << i, py << i, seed + i * 97);
+    norm += amp;
+    amp *= 0.5;
+  }
+  return val / norm;
 }
 
 const colorTextureCache = new Map<string, THREE.CanvasTexture>();
@@ -2005,6 +2090,146 @@ function renderPatternToCanvas(
           data[idx + 2] = b;
         } else {
           const f = 0.74 + 0.22 * crease + 0.06 * pore + 0.1 * (big.cellHash - 0.5);
+          data[idx] = Math.min(255, Math.round(r255 * f));
+          data[idx + 1] = Math.min(255, Math.round(g255 * f));
+          data[idx + 2] = Math.min(255, Math.round(b255 * f));
+        }
+        data[idx + 3] = 255;
+      }
+    }
+    ctx.putImageData(imgData, 0, 0);
+  } else if (type === 'animal_fur') {
+    // Pelaje: hebras finas a lo largo de V, mechones y ondulación suave (todo periódico)
+    const imgData = ctx.createImageData(size, size);
+    const data = imgData.data;
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const u = x / size;
+        const v = y / size;
+        const wave = 0.012 * Math.sin(2 * Math.PI * (v * 2 + periodicNoise2D(u, v, 4, 4, 905) * 0.6));
+        const uu = (u + wave + 1) % 1;
+        const strands = periodicNoise2D(uu, v, 160, 10, 911);
+        const fine = periodicNoise2D(uu, v, 320, 18, 919);
+        const clump = periodicFbm(uu, v, 12, 6, 3, 923);
+        const tip = Math.pow(strands, 3);
+        const h = Math.min(1, 0.25 + 0.45 * strands + 0.15 * fine + 0.25 * clump);
+        const idx = (y * size + x) * 4;
+        if (isBumpPass) {
+          const b = Math.round(h * 255);
+          data[idx] = b; data[idx + 1] = b; data[idx + 2] = b;
+        } else {
+          const f = 0.58 + 0.34 * h + 0.18 * tip;
+          data[idx] = Math.min(255, Math.round(r255 * f));
+          data[idx + 1] = Math.min(255, Math.round(g255 * f));
+          data[idx + 2] = Math.min(255, Math.round(b255 * f));
+        }
+        data[idx + 3] = 255;
+      }
+    }
+    ctx.putImageData(imgData, 0, 0);
+  } else if (type === 'feathers') {
+    // Plumas solapadas en filas desplazadas; cada pluma con raquis central y barbas inclinadas
+    const imgData = ctx.createImageData(size, size);
+    const data = imgData.data;
+    const cols = 8;
+    const rows = 8;
+    const len = 1.7; // largo de la pluma en filas (se solapan)
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const gx = (x / size) * cols;
+        const gy = (y / size) * rows;
+        let shade = 0.35; // hueco oscuro entre plumas
+        let height = 0.2;
+        const r0 = Math.floor(gy);
+        // de la fila más alta (debajo) a la más baja (encima): la última que cubre el píxel gana
+        for (let dr = -2; dr <= 0; dr++) {
+          const r = r0 + dr;
+          const off = (((r % 2) + 2) % 2) * 0.5;
+          for (let dc = -1; dc <= 1; dc++) {
+            const cx = Math.floor(gx - off) + dc + off + 0.5;
+            const t = (gy - r) / len; // 0 en la base, 1 en la punta
+            if (t < 0 || t > 1) continue;
+            const halfW = 0.62 * Math.sin(Math.PI * Math.min(1, t * 0.9 + 0.08));
+            const d = (gx - cx) / Math.max(0.001, halfW);
+            if (Math.abs(d) > 1) continue;
+            const wr = ((r % rows) + rows) % rows;
+            const wc = ((Math.round(cx - off) % cols) + cols) % cols;
+            const tone = hash2D(wc, wr, 947);
+            const barbs = 0.5 + 0.5 * Math.sin((t * 26 + Math.abs(d) * 5) * Math.PI);
+            const rachis = Math.abs(d) < 0.07 ? 0.25 : 0;
+            const edge = 1 - Math.pow(Math.abs(d), 6);
+            shade = (0.62 + 0.22 * tone + 0.12 * barbs + rachis) * (0.55 + 0.45 * edge) * (0.75 + 0.25 * t);
+            height = 0.35 + 0.35 * t + 0.15 * barbs + rachis * 0.6 - 0.25 * Math.pow(Math.abs(d), 4);
+          }
+        }
+        const idx = (y * size + x) * 4;
+        if (isBumpPass) {
+          const b = Math.round(Math.max(0, Math.min(1, height)) * 255);
+          data[idx] = b; data[idx + 1] = b; data[idx + 2] = b;
+        } else {
+          data[idx] = Math.min(255, Math.round(r255 * shade));
+          data[idx + 1] = Math.min(255, Math.round(g255 * shade));
+          data[idx + 2] = Math.min(255, Math.round(b255 * shade));
+        }
+        data[idx + 3] = 255;
+      }
+    }
+    ctx.putImageData(imgData, 0, 0);
+  } else if (type === 'bone_ivory') {
+    // Hueso: vetas a lo largo, poros pequeños y grietas finas aisladas
+    const imgData = ctx.createImageData(size, size);
+    const data = imgData.data;
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const u = x / size;
+        const v = y / size;
+        const streak = periodicFbm(u, v, 48, 4, 3, 961);
+        const blotch = periodicFbm(u, v, 6, 6, 3, 967);
+        const pores = voronoi2D(u, v, 40, 971);
+        const pore = pores.f1 < 0.18 ? 1 - pores.f1 / 0.18 : 0;
+        const cr = voronoi2D(u, v, 7, 977);
+        const crackMask = Math.max(0, (periodicNoise2D(u, v, 5, 5, 983) - 0.7) / 0.3);
+        const crack = 0.5 * crackMask * Math.max(0, 1 - (cr.f2 - cr.f1) / 0.02);
+        const h = 0.62 + 0.18 * streak + 0.12 * blotch - 0.35 * pore * 0.6 - 0.45 * crack;
+        const idx = (y * size + x) * 4;
+        if (isBumpPass) {
+          const b = Math.round(Math.max(0, Math.min(1, h)) * 255);
+          data[idx] = b; data[idx + 1] = b; data[idx + 2] = b;
+        } else {
+          const f = 0.78 + 0.16 * streak + 0.1 * blotch - 0.22 * pore - 0.4 * crack;
+          // ligero amarilleo en las zonas manchadas
+          data[idx] = Math.min(255, Math.round(r255 * f));
+          data[idx + 1] = Math.min(255, Math.round(g255 * (f - 0.03 * blotch)));
+          data[idx + 2] = Math.min(255, Math.round(b255 * (f - 0.08 * blotch)));
+        }
+        data[idx + 3] = 255;
+      }
+    }
+    ctx.putImageData(imgData, 0, 0);
+  } else if (type === 'chitin_carapace') {
+    // Quitina: placas segmentadas (bandas en V) con borde solapado, poros y moteado
+    const imgData = ctx.createImageData(size, size);
+    const data = imgData.data;
+    const bands = 7;
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const u = x / size;
+        const v = y / size;
+        const bend = 0.018 * Math.sin(2 * Math.PI * u) + 0.03 * periodicNoise2D(u, v, 6, 6, 991);
+        const pos = (((v + bend) * bands) % 1 + 1) % 1; // 0 = borde superior de la placa
+        const ridge = pos < 0.08 ? pos / 0.08 : 1;
+        const curve = Math.sin(Math.PI * pos);
+        const pits = voronoi2D(u, v, 34, 997);
+        const pit = pits.f1 < 0.16 ? 1 - pits.f1 / 0.16 : 0;
+        const mottle = periodicFbm(u, v, 8, 8, 3, 1009);
+        const seg = 0;
+        const h = 0.25 + 0.55 * curve * ridge - 0.15 * pit - 0.2 * seg;
+        const idx = (y * size + x) * 4;
+        if (isBumpPass) {
+          const b = Math.round(Math.max(0, Math.min(1, h)) * 255);
+          data[idx] = b; data[idx + 1] = b; data[idx + 2] = b;
+        } else {
+          const f = (0.5 + 0.3 * curve + 0.3 * mottle) * (0.6 + 0.4 * ridge) - 0.12 * pit - 0.15 * seg;
           data[idx] = Math.min(255, Math.round(r255 * f));
           data[idx + 1] = Math.min(255, Math.round(g255 * f));
           data[idx + 2] = Math.min(255, Math.round(b255 * f));

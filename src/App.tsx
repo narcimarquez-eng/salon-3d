@@ -148,7 +148,8 @@ import PythonScriptModal, {
   SceneBoundsData,
 } from './components/PythonScriptModal';
 import MyTexturesPanel from './components/MyTexturesPanel';
-import GlbZonesPanel from './components/GlbZonesPanel';
+import GlbZonesPanel, { GlbSource } from './components/GlbZonesPanel';
+import MonsterLoaderPanel from './components/MonsterLoaderPanel';
 import {
   ColorMapTextureInfo,
   ColorMapSet,
@@ -278,7 +279,7 @@ export default function App() {
   const [userColorMaps, setUserColorMaps] = useState<ColorMapSet | null>(null);
   const [userColorTileMeters, setUserColorTileMeters] = useState<number>(3);
   // GLB original subido por el usuario, para el optimizador por zonas (la vista previa no lo sustituye)
-  const [sourceGlb, setSourceGlb] = useState<{ name: string; file: File } | null>(null);
+  const [sourceGlb, setSourceGlb] = useState<GlbSource | null>(null);
   const [textureCategoryFilter, setTextureCategoryFilter] = useState<'all' | TextureCategoryType>('all');
   const [textureRepeatScale, setTextureRepeatScale] = useState<number>(2);
   const [textureBumpIntensity, setTextureBumpIntensity] = useState<number>(1.0);
@@ -5260,6 +5261,14 @@ export default function App() {
                   </button>
                 </div>
               </div>
+
+              {/* Monstruos de Enemigo-rpg: se generan aquí y pasan al optimizador por zonas */}
+              <MonsterLoaderPanel
+                onLoad={(src) => {
+                  setSourceGlb(src);
+                  sceneRefs.current?.loadGlbFromFile(src.file);
+                }}
+              />
 
               {/* Optimizador por zonas: solo aparece con un GLB subido por el usuario */}
               <GlbZonesPanel source={sourceGlb} onPreview={(f) => sceneRefs.current?.loadGlbFromFile(f)} />

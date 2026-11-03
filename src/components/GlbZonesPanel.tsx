@@ -13,9 +13,17 @@ import {
   suggestZoneChoice,
 } from '../utils/glbZoneOptimizer';
 
+/** GLB de origen. Puede traer una recomendación de texturas por zona y optimizarse solo al cargarse. */
+export interface GlbSource {
+  name: string;
+  file: File;
+  recommend?: (zones: GlbZone[]) => { plans: Map<number, ZonePlan>; summary: string };
+  autoRun?: boolean;
+}
+
 interface GlbZonesPanelProps {
   /** GLB original subido por el usuario (no cambia al previsualizar el resultado) */
-  source: { name: string; file: File } | null;
+  source: GlbSource | null;
   /** Carga un GLB en el visor sin sustituir el original */
   onPreview: (file: File) => void;
 }
@@ -54,10 +62,11 @@ export default function GlbZonesPanel({ source, onPreview }: GlbZonesPanelProps)
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<OptimizeResult | null>(null);
+  const [recommendSummary, setRecommendSummary] = useState<string | null>(null);
 
   // Analizar el GLB al cargarlo
   useEffect(() => {
-    setZones([]); setSummary(null); setResult(null); setError(null);
+    setZones([]); setSummary(null); setResult(null); setError(null); setRecommendSummary(null);
     if (!source) return;
     let cancelled = false;
     source.file.arrayBuffer().then((buf) => {
@@ -66,7 +75,14 @@ export default function GlbZonesPanel({ source, onPreview }: GlbZonesPanelProps)
         const a = analyzeGlbZones(buf);
         setZones(a.zones);
         setSummary(a.summary);
-        setPlans(new Map(a.zones.map((z) => [z.index, { choice: { kind: 'keep' }, maxSize: 1024 } as ZonePlan])));
+        let initial = new Map(a.zones.map((z) => [z.index, { choice: { kind: 'keep' }, maxSize: 1024 } as ZonePlan]));
+        if (source.recommend) {
+          const rec = source.recommend(a.zones);
+          initial = rec.plans;
+          setRecommendSummary(rec.summary);
+        }
+        setPlans(initial);
+        if (source.autoRun) void run(initial);
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       }
@@ -88,12 +104,12 @@ export default function GlbZonesPanel({ source, onPreview }: GlbZonesPanelProps)
     setPlans(new Map(zones.map((z) => [z.index, { choice: suggestZoneChoice(z, replaceExisting), maxSize: z.effect ? 256 : 1024 } as ZonePlan])));
   };
 
-  const run = async () => {
+  const run = async (plansOverride?: Map<number, ZonePlan>) => {
     if (!source) return;
     setBusy(true); setError(null);
     try {
       const buf = await source.file.arrayBuffer();
-      const r = await optimizeGlb(buf, plans, { jpegQuality: 0.88, compactSkin, triangleRatio });
+      const r = await optimizeGlb(buf, plansOverride ?? plans, { jpegQuality: 0.88, compactSkin, triangleRatio });
       setResult(r);
       const base = source.name.replace(/\.glb$/i, '');
       const copy = new Uint8Array(r.bytes.length); copy.set(r.bytes);
@@ -138,6 +154,11 @@ export default function GlbZonesPanel({ source, onPreview }: GlbZonesPanelProps)
           </>
         )}
       </p>
+      {recommendSummary && (
+        <div className="text-[11px] px-2 py-1 rounded border text-violet-200 bg-violet-500/10 border-violet-400/30" data-testid="zonas-recomendacion">
+          Texturas recomendadas: {recommendSummary}
+        </div>
+      )}
       {error && <div className="text-[11px] px-2 py-1 rounded border text-rose-300 bg-rose-500/10 border-rose-400/30">{error}</div>}
 
       <div className="flex gap-2">
@@ -219,7 +240,7 @@ export default function GlbZonesPanel({ source, onPreview }: GlbZonesPanelProps)
       </ul>
 
       <div className="grid grid-cols-2 gap-2">
-        <button type="button" onClick={run} disabled={busy || !zones.length}
+        <button type="button" onClick={() => void run()} disabled={busy || !zones.length}
           className="py-2 px-2 rounded-lg bg-violet-400 hover:bg-violet-300 text-slate-950 font-semibold flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50">
           <Play className="w-3.5 h-3.5" /><span>{busy ? 'Optimizando…' : 'Optimizar y ver'}</span>
         </button>
