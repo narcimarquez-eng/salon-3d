@@ -38,6 +38,12 @@ por bueno, comprueba que no repite ninguno.
 - **Gradas que salen blancas**: con huellas azules y contrahuellas de hormigón, desde el campo
   solo se ven las contrahuellas. Divide cada contrahuella en una franja baja de hormigón y el
   respaldo de la butaca (textura `bb_butacas`, solo varía en horizontal).
+- **Letras de rótulo** (pasarela de Moguer): se hacen con trazos (`barra` de punto a punto en el
+  plano de la cara) alargados medio grueso por cada lado para que las esquinas queden macizas.
+  Rematar cada trazo con cilindros redondos deja "bolitas" brillantes en las juntas. Un rojo de
+  rótulo es `(0.30, 0.010, 0.008)`; con más valor sale salmón.
+- **Suelo de rejilla**: `cyber_circuits` dibuja líneas azules de circuito; para rejilla metálica
+  va mejor `carbon_weave` sobre gris oscuro.
 - **Pelaje que parece plástico** (monstruos de Enemigo-rpg): el color venía del brillo "sheen"
   sobre una base casi negra; al poner la textura de pelaje se aclara la base con su mismo tono.
 
@@ -119,4 +125,5 @@ Mira el script más parecido antes de empezar uno nuevo:
 | `ayuntamiento/` | Fachada con texturas CC0 (`mat.color_map`) y optimización del GLB |
 | `puestos/` | Props ligeros de estilo Lineage 2 (pocos lados, materiales compartidos) |
 | `orco/` | Personaje con manos, pies y armadura hecho con primitivas |
+| `pasarela_moguer/` | Pasarela de celosía tubular a partir de fotos del usuario: función `tubo(a, b)` para tubos redondos en cualquier dirección, escaleras, rampas en zigzag con barandillas y rótulo de letras por trazos |
 | `bernabeu/` | Estadio de 72 k triángulos con mallas propias (`from_pydata`): gradas escalonadas, cubierta, fachada de lamas; texturas CC0 de ambientCG y Poly Haven descargadas y preparadas con un script |
