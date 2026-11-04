@@ -164,6 +164,20 @@ esfera("MFD_Fraile_Cabeza", (0, 0.5, 33.0), 1.0, m_caliza, (1.2, 1.1, 1.35), 64,
 capas("MFD_Fraile_Capucha", 30.6, 35.8, 2.0, 1.7, 1.3, 1.2, 0.0, 0.8, 24, 64, m_caliza)
 # Coronilla redondeada: cierra la capucha por arriba en vez de dejar un disco plano
 esfera("MFD_Fraile_Coronilla", (0, 0.8, 35.6), 1.3, m_caliza, (1.0, 0.92, 0.8), 64, 48)
+
+# Pliegues de la capucha: cordones que bajan desde la coronilla hasta los hombros siguiendo
+# la superficie del hábito. Van por la mitad frontal y dejan libre la zona del rostro.
+def punto_capucha(a, z, k):
+    # Punto sobre la capucha a la altura z y ángulo a; k escala la superficie (k > 1 = fuera)
+    t = (z - 30.6) / 5.2
+    rx = (2.0 - 0.7 * t) * k
+    ry = (1.7 - 0.5 * t) * k
+    return [rx * math.cos(a), 0.8 + ry * math.sin(a), z]
+
+for i in range(12):
+    a = 1.2 * math.pi + i * (0.6 * math.pi / 11)
+    if abs(a - 1.5 * math.pi) > 0.45:
+        tubo("MFD_Fraile_Pliegue_" + str(i), punto_capucha(a, 31.0, 1.08), punto_capucha(a, 35.2, 1.04), 0.14, m_caliza, 12)
 # Rostro: óvalo con nariz, cejas, ojos y boca. Sobresale unos 0,8 m de la capucha
 esfera("MFD_Fraile_Rostro", (0, -1.0, 33.2), 0.55, m_caliza, (0.85, 0.9, 1.05), 40, 28)
 caja("MFD_Fraile_Nariz", (0, -1.55, 33.0), (0.28, 0.35, 0.8), m_caliza)
