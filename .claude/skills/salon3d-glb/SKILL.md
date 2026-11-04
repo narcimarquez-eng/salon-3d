@@ -41,6 +41,13 @@ el GLB. Lo que más valora es que el modelo se parezca de verdad a lo que pidió
    colocando la cámara en metros del script. Mira las capturas con atención: cada vuelta suele
    descubrir algo (piezas giradas al revés, colores lavados, texturas estiradas, escala).
    `references/lecciones.md` recoge los fallos que ya han pasado y cómo se arreglaron.
+   En escenas grandes usa `OCULTAR_PLATAFORMA=1 ESPERA_VISTA=10000` para las vistas propias.
+
+   **Texturas de internet**: ambientCG (`https://ambientcg.com/get?file=<Id>_1K-JPG.zip`) y Poly
+   Haven (`https://api.polyhaven.com/files/<id>`) son CC0 y se pueden descargar desde aquí.
+   Prepáralas con un script propio (tamaño, tinte, variantes) en `public/textures/`, regístralas en
+   `src/utils/textureLibrary.ts` y apunta la procedencia en `public/textures/CREDITS.md`. Ejemplo:
+   `bernabeu/preparar_texturas.py`.
 
 4. **Repite** hasta que se parezca. Dos o tres vueltas es lo normal. Si el usuario pidió
    "inténtalo varias veces", hazlo de verdad y enséñale la evolución.
@@ -87,7 +94,8 @@ node .claude/skills/salon3d-glb/scripts/capturar_y_exportar.cjs <tema>/<tema>.py
 
 ## Ramas y publicación
 
-- Trabaja en la rama de desarrollo de la sesión (hasta ahora `claude/eager-galileo-l27y51`).
+- Trabaja en la rama de desarrollo que indique la sesión (han sido `claude/eager-galileo-l27y51`
+  y `claude/trusting-planck-qlda9f`).
 - La web publicada (GitHub Pages, `https://narcimarquez-eng.github.io/salon-3d/`) se compila desde
   `claude/wizardly-thompson-ixy39w`; el usuario también quiere `main` al día. Tras cada commit,
   si son ancestros de HEAD, avanza ambas con `git push origin HEAD:<rama>` (sin forzar).

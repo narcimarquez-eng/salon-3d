@@ -3579,7 +3579,7 @@ export async function executeBlenderPythonScript(
 ): Promise<ScriptExecutionResult> {
   ensurePythonArrayMethods();
   // Las imágenes de mapa de color deben estar en memoria para resolver mat.color_map de forma síncrona
-  await preloadColorMapImages();
+  await preloadColorMapImages(script);
   startBlenderRun();
 
   const startTime = performance.now();

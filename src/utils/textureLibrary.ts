@@ -48,6 +48,75 @@ const BUILTIN_TEXTURES: ColorMapTextureInfo[] = [
     roughnessUrl: `${BASE_URL}textures/teja_arcilla_rough_1k.jpg`,
     license: 'CC0 · Poly Haven (Clay Roof Tiles 02) · color + normal + rugosidad',
   },
+  // Texturas del Santiago Bernabéu (bernabeu/preparar_texturas.py)
+  {
+    id: 'bb_campo',
+    name: 'Campo de fútbol (105 × 68 m, usar escala 130)',
+    source: 'builtin',
+    url: `${BASE_URL}textures/bb_campo_2k.jpg`,
+    license: 'CC0 · ambientCG (Grass005) con franjas y líneas reglamentarias dibujadas',
+  },
+  {
+    id: 'bb_butacas',
+    name: 'Respaldos de butacas azul oscuro (0,5 m por butaca)',
+    source: 'builtin',
+    url: `${BASE_URL}textures/bb_butacas_256.jpg`,
+    license: 'Dibujada para salon-3d con grano CC0 de ambientCG (Concrete034)',
+  },
+  {
+    id: 'bb_pantalla',
+    name: 'Videomarcador (paneles de vídeo abstractos, 24 m)',
+    source: 'builtin',
+    url: `${BASE_URL}textures/bb_pantalla_1k.jpg`,
+    license: 'Dibujada para salon-3d',
+  },
+  {
+    id: 'bb_acero',
+    name: 'Acero inoxidable cepillado',
+    source: 'builtin',
+    url: `${BASE_URL}textures/bb_acero_diff_1k.jpg`,
+    normalUrl: `${BASE_URL}textures/bb_acero_nor_gl_1k.jpg`,
+    roughnessUrl: `${BASE_URL}textures/bb_acero_rough_1k.jpg`,
+    license: 'CC0 · ambientCG (Metal009) · color + normal + rugosidad',
+  },
+  {
+    id: 'bb_cubierta',
+    name: 'Chapa blanca de cubierta',
+    source: 'builtin',
+    url: `${BASE_URL}textures/bb_cubierta_diff_1k.jpg`,
+    license: 'CC0 · ambientCG (Metal049A)',
+  },
+  {
+    id: 'bb_hormigon',
+    name: 'Hormigón claro',
+    source: 'builtin',
+    url: `${BASE_URL}textures/bb_hormigon_diff_1k.jpg`,
+    normalUrl: `${BASE_URL}textures/bb_hormigon_nor_gl_1k.jpg`,
+    license: 'CC0 · ambientCG (Concrete034) · color + normal',
+  },
+  {
+    id: 'bb_hormigon_gris',
+    name: 'Hormigón gris',
+    source: 'builtin',
+    url: `${BASE_URL}textures/bb_hormigon_gris_diff_1k.jpg`,
+    license: 'CC0 · ambientCG (Concrete031)',
+  },
+  {
+    id: 'bb_asfalto',
+    name: 'Asfalto',
+    source: 'builtin',
+    url: `${BASE_URL}textures/bb_asfalto_diff_1k.jpg`,
+    normalUrl: `${BASE_URL}textures/bb_asfalto_nor_gl_1k.jpg`,
+    license: 'CC0 · Poly Haven (Asphalt 02) · color + normal',
+  },
+  {
+    id: 'bb_losa',
+    name: 'Losas de granito',
+    source: 'builtin',
+    url: `${BASE_URL}textures/bb_losa_diff_1k.jpg`,
+    normalUrl: `${BASE_URL}textures/bb_losa_nor_gl_1k.jpg`,
+    license: 'CC0 · Poly Haven (Large Grey Tiles) · color + normal',
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -218,10 +287,15 @@ function loadImage(url: string): Promise<HTMLImageElement> {
  * Se llama antes de ejecutar un script para que el motor pueda resolver
  * `mat.color_map = "..."` de forma síncrona.
  */
-export async function preloadColorMapImages(): Promise<void> {
+export async function preloadColorMapImages(scriptText?: string): Promise<void> {
   const all = await listAllColorMapTextures();
+  // Con el texto del script, solo se descargan las incluidas que el script nombra
+  // (las subidas por el usuario ya están en este navegador y se cargan siempre).
+  const wanted = scriptText
+    ? all.filter((info) => info.source === 'user' || scriptText.includes(info.id))
+    : all;
   await Promise.all(
-    all.map(async (info) => {
+    wanted.map(async (info) => {
       if (loadedImages.has(info.id)) return;
       try {
         const color = await loadImage(info.url);

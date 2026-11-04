@@ -29,6 +29,15 @@ por bueno, comprueba que no repite ninguno.
   largos, color liso.
 - **Texturas por nombre**: antes la app ponía texturas según el nombre del material; ya no. Si
   quieres una textura, pon `mat.texture = "..."` de forma explícita.
+- **Pantalla o LED que se ve blanca** (videomarcador del Bernabéu): con `Emission Strength` 1,8 y
+  bloom, un azul claro sale casi blanco y parece cielo. Para pantallas grandes usa una imagen
+  (`mat.color_map`) con emisión baja (0,5–0,7) de color oscuro y saturado.
+- **Con `mat.color_map` el color base no cuenta**: la app pone el color a blanco y usa la imagen
+  tal cual. Para aclarar, oscurecer o teñir, cambia la propia imagen (ver
+  `bernabeu/preparar_texturas.py`, que tiñe y hace variantes de texturas descargadas).
+- **Gradas que salen blancas**: con huellas azules y contrahuellas de hormigón, desde el campo
+  solo se ven las contrahuellas. Divide cada contrahuella en una franja baja de hormigón y el
+  respaldo de la butaca (textura `bb_butacas`, solo varía en horizontal).
 - **Pelaje que parece plástico** (monstruos de Enemigo-rpg): el color venía del brillo "sheen"
   sobre una base casi negra; al poner la textura de pelaje se aclara la base con su mismo tono.
 
@@ -43,6 +52,15 @@ por bueno, comprueba que no repite ninguno.
 - **Modelo diminuto en la vista general**: el suelo o el agua eran mucho más grandes que el
   modelo. Ajústalos al tamaño del modelo.
 - **Partes finas que desaparecen al reducir triángulos**: ver sección 5.
+- **Mallas propias (`from_pydata`) sin material**: `me.materials.append(mat)` antes de
+  `objects.new` no hace nada. Asigna el material después de enlazar:
+  `bpy.context.collection.objects.link(ob)` y luego `ob.data.materials.append(mat)`.
+- **Caras de `from_pydata` invisibles**: las mallas opacas solo pintan la cara delantera
+  (vértices en sentido antihorario vistos desde fuera). Las funciones `anillo_arriba`,
+  `pared_dentro`, `pared_fuera`... de `bernabeu/santiago_bernabeu.py` ya traen el orden bueno.
+- **Gradas y anillos de estadio**: un contorno de rectángulo con esquinas redondeadas definido
+  como lista de [centro, normal] permite sacar curvas paralelas a cualquier distancia R con la
+  misma cantidad de puntos (`P(k, R, z)`), y coser gradas, cubierta y fachada sin juntas.
 
 ## 3. Motor Python
 
@@ -61,6 +79,15 @@ por bueno, comprueba que no repite ninguno.
   si Playwright dice "Execution context was destroyed", espera unos segundos y repite.
 - El estudio Python tapa la vista: el script de captura lo cierra con Escape.
 - El botón de modo (EEVEE) vuelve al de la sesión al cerrar el estudio; no hace falta tocarlo.
+- **Anillos amarillo y azul en las vistas cercanas**: es el cursor del pincel de esculpir, que
+  se queda donde pasó el ratón. El script de captura lo oculta con `OCULTAR_PLATAFORMA=1`
+  (`celshadeViewer.setPedestalVisible(false)` tras mover el ratón), junto con plataforma y ejes.
+- **La vista propia sale en otro sitio**: la cámara se mueve con una transición suave; en escenas
+  de cientos de metros 3,5 s no bastan. Usa `ESPERA_VISTA=10000`.
+- `celshadeViewer.pickAt(x, y)` (x, y de 0 a 1 en el lienzo) dice qué objetos hay bajo ese punto:
+  sirve para saber qué es una mancha rara en una captura.
+- Las texturas incluidas solo se descargan si el script las nombra (`mat.color_map = "id"`), así
+  que añadir texturas a `textureLibrary.ts` no frena los demás modelos.
 - Todos los GLB exportados llevan como nodo raíz "Golem_Enemigo_LowPoly" (herencia del modelo de
   demostración). No cambia nada visual; pendiente de arreglar si el usuario lo pide.
 
@@ -92,3 +119,4 @@ Mira el script más parecido antes de empezar uno nuevo:
 | `ayuntamiento/` | Fachada con texturas CC0 (`mat.color_map`) y optimización del GLB |
 | `puestos/` | Props ligeros de estilo Lineage 2 (pocos lados, materiales compartidos) |
 | `orco/` | Personaje con manos, pies y armadura hecho con primitivas |
+| `bernabeu/` | Estadio de 72 k triángulos con mallas propias (`from_pydata`): gradas escalonadas, cubierta, fachada de lamas; texturas CC0 de ambientCG y Poly Haven descargadas y preparadas con un script |

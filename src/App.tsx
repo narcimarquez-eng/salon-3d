@@ -2068,6 +2068,31 @@ export default function App() {
           });
           return out.slice(0, 6);
         },
+        // Nombres de los objetos bajo un punto del lienzo (x, y entre 0 y 1), del más cercano al más lejano
+        pickAt: (x: number, y: number): string[] => {
+          const ray = new THREE.Raycaster();
+          ray.setFromCamera(new THREE.Vector2(x * 2 - 1, 1 - y * 2), camera);
+          return ray
+            .intersectObjects(scene.children, true)
+            .slice(0, 6)
+            .map((h) => {
+              const o = h.object as THREE.Mesh;
+              const mat = (Array.isArray(o.material) ? o.material[0] : o.material) as THREE.MeshBasicMaterial | undefined;
+              const extra = o.name ? '' : ` [${o.geometry?.type ?? ''} #${mat?.color?.getHexString?.() ?? ''}]`;
+              return `${o.name || o.type}${extra}${o.parent?.name ? ' < ' + o.parent.name : ''} @${h.distance.toFixed(2)}`;
+            });
+        },
+        // Oculta o muestra la plataforma, el anillo y los ejes de referencia, y con false también el
+        // cursor del pincel (todo esto tapa las vistas cercanas en las capturas)
+        setPedestalVisible: (visible: boolean) => {
+          pedestalGroup.visible = visible;
+          axesHelperGroup.visible = visible;
+          // El cursor del pincel se queda donde pasó el ratón por última vez: también se oculta
+          if (!visible) {
+            brushIndicator.visible = false;
+            symmetryIndicator.visible = false;
+          }
+        },
         // Coloca la cámara en `pos` mirando a `target` (coordenadas de escena)
         setCameraPose: (pos: [number, number, number], target: [number, number, number]) => {
           const trans = cameraTransitionRef.current;
