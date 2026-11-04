@@ -1419,7 +1419,8 @@ export default function App() {
 
     // Encuadra todo el modelo: cámara en vista 3/4 a la distancia necesaria para que quepa
     // entero en pantalla (en alto y en ancho). `margen` > 1 aleja la cámara.
-    const frameModel = (margen: number = 1.25) => {
+    // `dir` (opcional): dirección desde el centro del modelo hacia la cámara; por defecto, vista 3/4
+    const frameModel = (margen: number = 1.25, dir?: [number, number, number]) => {
       if (!currentModelWrapper) return;
       const box = new THREE.Box3().setFromObject(currentModelWrapper);
       if (box.isEmpty()) return;
@@ -1430,7 +1431,7 @@ export default function App() {
       const distH = sphere.radius / Math.sin(hfov / 2);
       const distancia = Math.max(distV, distH) * margen;
 
-      const direccion = new THREE.Vector3(0.85, 0.45, 3.45).normalize();
+      const direccion = (dir ? new THREE.Vector3(dir[0], dir[1], dir[2]) : new THREE.Vector3(0.85, 0.45, 3.45)).normalize();
       const trans = cameraTransitionRef.current;
       trans.active = true;
       trans.targetLookAt.copy(sphere.center);
