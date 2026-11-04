@@ -1502,6 +1502,9 @@ function configureNewlySpawnedMesh(
   mesh.userData.baseMetalness = baseMetal;
   mesh.userData.baseClearcoat = pbrProps?.clearcoat;
   mesh.userData.baseIor = pbrProps?.ior ?? 1.5;
+  // Transparencia propia del script (cristal, agua...): la conservan los efectos globales de la app
+  mesh.userData.baseTransmission = pbrProps?.transmission ?? 0;
+  mesh.userData.baseAlpha = pbrProps?.alpha ?? 1;
 
   const stdMat = new THREE.MeshPhysicalMaterial({
     color: baseColor.clone(),
@@ -1790,6 +1793,8 @@ function applyMaterialToThreeMesh(
   if (resolvedIor !== undefined) {
     mesh.userData.baseIor = Math.max(1.0, Math.min(2.5, resolvedIor));
   }
+  mesh.userData.baseTransmission = transVal;
+  mesh.userData.baseAlpha = alphaVal;
 
   const eeveeMat = mesh.userData.eeveeMaterial as THREE.MeshPhysicalMaterial | undefined;
   if (eeveeMat) {

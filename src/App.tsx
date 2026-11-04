@@ -693,7 +693,12 @@ export default function App() {
           ? origClearcoat ?? 0.15
           : presetInfo.pbr.clearcoat;
         const activeIor = isNone ? origIor : presetInfo.pbr.ior;
-        const activeTrans = isNone ? 0 : presetInfo.pbr.transmission ?? 0;
+        // Sin textura global se respeta la transparencia propia de cada malla (cristal, agua...)
+        const activeTrans = isNone
+          ? ((mesh.userData.baseTransmission as number | undefined) ?? 0)
+          : presetInfo.pbr.transmission ?? 0;
+        const activeAlpha = isNone ? ((mesh.userData.baseAlpha as number | undefined) ?? 1) : 1;
+        const seeThrough = activeTrans > 0.05 || activeAlpha < 0.99;
 
         const toonMat = mesh.userData.toonMaterial as THREE.MeshToonMaterial | undefined;
         if (toonMat) {
@@ -718,8 +723,8 @@ export default function App() {
           eeveeMat.clearcoat = activeClearcoat;
           eeveeMat.ior = activeIor;
           eeveeMat.transmission = activeTrans;
-          eeveeMat.transparent = activeTrans > 0.05;
-          eeveeMat.opacity = activeTrans > 0.05 ? 1.0 - activeTrans * 0.45 : 1.0;
+          eeveeMat.transparent = seeThrough;
+          eeveeMat.opacity = seeThrough ? Math.min(activeAlpha, 1.0 - activeTrans * 0.45) : 1.0;
           eeveeMat.needsUpdate = true;
         }
 
@@ -742,8 +747,8 @@ export default function App() {
             : Math.max(activeClearcoat, settingsRef.current.cyclesClearcoat * (1.0 - activeRough * 0.7));
           cyclesMat.ior = activeIor;
           cyclesMat.transmission = activeTrans;
-          cyclesMat.transparent = activeTrans > 0.05;
-          cyclesMat.opacity = activeTrans > 0.05 ? 1.0 - activeTrans * 0.4 : 1.0;
+          cyclesMat.transparent = seeThrough;
+          cyclesMat.opacity = seeThrough ? Math.min(activeAlpha, 1.0 - activeTrans * 0.4) : 1.0;
           cyclesMat.needsUpdate = true;
         }
 
@@ -2014,6 +2019,21 @@ export default function App() {
           const p = new THREE.Vector3();
           (found as THREE.Object3D).getWorldPosition(p);
           return [p.x, p.y, p.z];
+        },
+        // Material visible de las mallas cuyo nombre empieza por `prefijo` (para depurar transparencias)
+        materialOf: (prefijo: string) => {
+          const out: Record<string, unknown>[] = [];
+          scene.traverse((o) => {
+            const m = o as THREE.Mesh;
+            if (!m.isMesh || !o.name.startsWith(prefijo)) return;
+            const mats = (Array.isArray(m.material) ? m.material : [m.material]) as THREE.MeshPhysicalMaterial[];
+            out.push({
+              name: o.name,
+              mats: mats.map((x) => ({ type: x.type, transparent: x.transparent, opacity: x.opacity, transmission: x.transmission, color: x.color?.getHexString?.(), side: x.side, depthWrite: x.depthWrite })),
+              userData: { baseAlpha: (m.userData as Record<string, unknown>).baseAlpha, alpha: (m.userData as Record<string, unknown>).alpha },
+            });
+          });
+          return out.slice(0, 6);
         },
         // Coloca la cámara en `pos` mirando a `target` (coordenadas de escena)
         setCameraPose: (pos: [number, number, number], target: [number, number, number]) => {
