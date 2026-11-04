@@ -492,7 +492,7 @@ interface PythonScriptModalProps {
   onThinkingLevelChange?: (level: ThinkingLevelChoice) => void;
   userEmail?: string | null;
   onUsageUpdated?: (stats: GeminiWeeklyUsageStats) => void;
-  onClearScene?: () => void;
+  onClearScene?: (keepCode?: boolean) => void;
   coordinateMode?: BlenderCoordinateMode;
   onCoordinateModeChange?: (mode: BlenderCoordinateMode) => void;
   onSwapSceneAxesYZ?: () => void;
@@ -531,10 +531,8 @@ export default function PythonScriptModal({
     if (onThinkingLevelChange) onThinkingLevelChange(lvl);
   };
 
-  const [selectedPresetId, setSelectedPresetId] = useState<string>('gen_blender52_mecha_paladin');
-  const [scriptCode, setScriptCode] = useState<string>(
-    BLENDER_SCRIPT_PRESETS[0].code
-  );
+  const [selectedPresetId, setSelectedPresetId] = useState<string>('');
+  const [scriptCode, setScriptCode] = useState<string>('');
   const [internalCoordinateMode, setInternalCoordinateMode] = useState<BlenderCoordinateMode>('auto');
   const coordinateMode = onCoordinateModeChange && externalCoordMode ? externalCoordMode : internalCoordinateMode;
   const handleCoordinateModeSelect = (nextMode: BlenderCoordinateMode, reRunCurrentScript: boolean = false) => {
@@ -738,7 +736,7 @@ export default function PythonScriptModal({
     setGeminiSummary(null);
     setPasteHintMessage(null);
     if (alsoClear3DScene && onClearScene) {
-      onClearScene();
+      onClearScene(false);
       setTerminalLogs([
         '🧹 [Editor & Escena 3D] Todo borrado. Lienzo y editor listos desde 0.',
         '💡 Escribe tu código Python bpy desde cero o pega un script con Ctrl + V.',
@@ -771,7 +769,7 @@ bpy.ops.object.delete()
     setLastResult(null);
     setGeminiSummary(null);
     if (onClearScene) {
-      onClearScene();
+      onClearScene(true);
     }
     setTerminalLogs([
       '📄 [Plantilla Desde 0] Plantilla base cargada y escena 3D limpia.',
@@ -953,6 +951,7 @@ Termina siempre con bpy.ops.mesh.auto_ground() y devuelve únicamente el bloque 
         const clipText = await navigator.clipboard.readText();
         if (clipText && clipText.trim()) {
           const cleaned = stripMarkdownCodeFences(clipText);
+          onClearScene?.(true);
           setScriptCode(cleaned);
           setSelectedPresetId('web_blender52_custom');
           await handleExecute(false, cleaned, 'Script Blender 5.2 Web');
@@ -994,6 +993,7 @@ Termina siempre con bpy.ops.mesh.auto_ground() y devuelve únicamente el bloque 
     if (pasteHintMessage || isEntireEditorSelected || isFullScriptPaste) {
       e.preventDefault();
       const cleaned = stripMarkdownCodeFences(pastedText);
+      onClearScene?.(true);
       setScriptCode(cleaned);
       setSelectedPresetId('web_blender52_custom');
       setPasteHintMessage(null);
@@ -1009,6 +1009,7 @@ Termina siempre con bpy.ops.mesh.auto_ground() y devuelve únicamente el bloque 
     if (!pastedText.trim()) return;
     e.preventDefault();
     const cleaned = stripMarkdownCodeFences(pastedText);
+    onClearScene?.(true);
     setScriptCode(cleaned);
     setSelectedPresetId('web_blender52_custom');
     setPasteHintMessage(null);
@@ -1023,6 +1024,7 @@ Termina siempre con bpy.ops.mesh.auto_ground() y devuelve únicamente el bloque 
     if (isLikelyBlenderPythonCode(pastedText)) {
       e.preventDefault();
       const cleaned = stripMarkdownCodeFences(pastedText);
+      onClearScene?.(true);
       setScriptCode(cleaned);
       setSelectedPresetId('web_blender52_custom');
       setGeminiPrompt('');
@@ -1031,6 +1033,8 @@ Termina siempre con bpy.ops.mesh.auto_ground() y devuelve únicamente el bloque 
         'Detectado código Python (bpy) al pegar: ejecutado directamente en el motor Blender 5.2 (0 llamadas API).'
       );
       void handleExecute(false, cleaned, 'Script Blender 5.2 Pegado');
+    } else if (pastedText.trim().length > 0 && geminiMode === 'replace') {
+      onClearScene?.(true);
     }
   };
 
@@ -1045,6 +1049,7 @@ Termina siempre con bpy.ops.mesh.auto_ground() y devuelve únicamente el bloque 
     // Si el usuario pegó directamente un script Python de Blender en la caja de prompt, ejecutarlo localmente sin gastar cuota API
     if (isLikelyBlenderPythonCode(promptToUse)) {
       const cleaned = stripMarkdownCodeFences(promptToUse);
+      onClearScene?.(true);
       setScriptCode(cleaned);
       setSelectedPresetId('web_blender52_custom');
       setGeminiPrompt('');
@@ -1063,6 +1068,10 @@ Termina siempre con bpy.ops.mesh.auto_ground() y devuelve únicamente el bloque 
     const viewportSnap =
       helpers.sendViewportSnapshot && getViewportSnapshot ? getViewportSnapshot() : null;
     const sceneBounds = getSceneBounds ? getSceneBounds() : undefined;
+
+    if (modeToUse === 'replace') {
+      onClearScene?.(true);
+    }
 
     setTerminalLogs([
       `>>> [Asistente Gemini 3D] Modelo: ${activeModel} | Pensamiento: ${activeThinking}`,
@@ -1836,7 +1845,13 @@ Termina siempre con bpy.ops.mesh.auto_ground() y devuelve únicamente el bloque 
                   <input
                     type="text"
                     value={geminiPrompt}
-                    onChange={(e) => setGeminiPrompt(e.target.value)}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val.trim().length > 0 && geminiMode === 'replace') {
+                        onClearScene?.(true);
+                      }
+                      setGeminiPrompt(val);
+                    }}
                     onPaste={handlePromptInputPaste}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {

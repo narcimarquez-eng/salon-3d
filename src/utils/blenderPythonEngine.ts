@@ -20,7 +20,13 @@ import {
 } from './geometrySmoothing';
 import { getProceduralMatcapTexture, MatcapPresetId } from './matcapGenerator';
 import ayuntamientoMoguerCode from '../../ayuntamiento/ayuntamiento_moguer.py?raw';
-import { addBlenderLoop, setBlenderWater, startBlenderRun, finalizeBlenderRun } from './blenderAnimation';
+import {
+  addBlenderLoop,
+  setBlenderWater,
+  startBlenderRun,
+  finalizeBlenderRun,
+  clearBlenderAnimations,
+} from './blenderAnimation';
 import {
   applyBoxProjectedUv,
   getColorMapSet,
@@ -3616,6 +3622,33 @@ export async function executeBlenderPythonScript(
   }
   const targetParent: THREE.Object3D = rootGroup;
 
+  // Si el script construye geometría nueva (primitivas, bmesh, from_pydata, objects.new) y no es un script explícito de adición (# MODE: APPEND),
+  // limpiamos automáticamente la pantalla antes de ejecutar para que nunca queden restos del modelo anterior.
+  const isExplicitAppendScript =
+    /#\s*MODE\s*:\s*APPEND/i.test(cleanedRawScript) ||
+    cleanedRawScript.includes('AÑADIR NUEVOS OBJETOS AL MODELO ACTUAL');
+  const isGenerativeScript =
+    /\b(?:primitive_[a-z0-9_]+_add|from_pydata|bmesh\.ops\.create_[a-z0-9_]+|bpy\.data\.(?:meshes|objects)\.new|read_factory_settings)\b/.test(
+      cleanedRawScript
+    );
+
+  if (isGenerativeScript && !isExplicitAppendScript) {
+    const prevChildren = [...targetParent.children];
+    prevChildren.forEach((child) => {
+      child.traverse((c) => {
+        if ((c as THREE.Mesh).isMesh) {
+          (c as THREE.Mesh).geometry?.dispose();
+        }
+      });
+      targetParent.remove(child);
+    });
+    targetParent.name = 'Blender_Scene_Root';
+    targetParent.scale.setScalar(1);
+    targetParent.position.set(0, -1.35, 0);
+    targetParent.rotation.set(0, 0, 0);
+    clearBlenderAnimations();
+  }
+
   // Conversores de vectores Blender <-> Three.js según modo Z-Up / Y-Up
   const convertLocToThree = (loc?: any): [number, number, number] => {
     if (!loc) return [0, isZUp ? 0 : 1.35, 0];
@@ -6355,9 +6388,11 @@ export async function executeBlenderPythonScript(
             targetParent.remove(child);
           });
           worldEnvLight = null;
+          targetParent.name = 'Blender_Scene_Root';
           targetParent.scale.setScalar(1);
           targetParent.position.set(0, -1.35, 0);
           targetParent.rotation.set(0, 0, 0);
+          clearBlenderAnimations();
           allObjectProxies.length = 0;
           proxiesDirty = true;
           collectMeshes();
@@ -7377,7 +7412,30 @@ export async function executeBlenderPythonScript(
           logs.push(`bpy.ops.view3d.frame_all(margin=${opts.margin ?? 1.2})`);
         },
       },
-      wm: createSafeNoopProxy(),
+      wm: createSafeNoopProxy({
+        read_factory_settings: () => {
+          const childrenCopy = [...targetParent.children];
+          childrenCopy.forEach((child) => {
+            child.traverse((c) => {
+              if ((c as THREE.Mesh).isMesh) {
+                const m = c as THREE.Mesh;
+                m.geometry?.dispose();
+              }
+            });
+            targetParent.remove(child);
+          });
+          worldEnvLight = null;
+          targetParent.name = 'Blender_Scene_Root';
+          targetParent.scale.setScalar(1);
+          targetParent.position.set(0, -1.35, 0);
+          targetParent.rotation.set(0, 0, 0);
+          clearBlenderAnimations();
+          allObjectProxies.length = 0;
+          proxiesDirty = true;
+          collectMeshes();
+          logs.push(`bpy.ops.wm.read_factory_settings(): escena reiniciada en limpio.`);
+        },
+      }),
       render: {
         set_engine: (...rawArgs: unknown[]) => {
           const opts = extractPyArgs(

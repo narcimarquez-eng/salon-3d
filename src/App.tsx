@@ -123,7 +123,7 @@ import {
   saveMasterDrawingCheckpoint,
   restoreMasterDrawingCheckpoint,
 } from './utils/meshDeformer';
-import { tickBlenderAnimations } from './utils/blenderAnimation';
+import { tickBlenderAnimations, clearBlenderAnimations } from './utils/blenderAnimation';
 import {
   BLENDER_SCRIPT_PRESETS,
   BlenderCoordinateMode,
@@ -246,10 +246,10 @@ export default function App() {
 
   const [settings, setSettings] = useState<PipelineSettings>(DEFAULT_SETTINGS);
   const [modelStats, setModelStats] = useState<ModelStats>({
-    name: 'Golem_Enemigo_LowPoly.glb (Demo)',
-    triangles: 5420,
-    vertices: 16260,
-    meshes: 16,
+    name: 'Lienzo_Vacio_Desde_0',
+    triangles: 0,
+    vertices: 0,
+    meshes: 0,
     isCustomGlb: false,
   });
 
@@ -1361,6 +1361,38 @@ export default function App() {
       mountProcessedObject(fallbackGroup, 'Golem_Enemigo_LowPoly.glb (Demo)', false);
     };
 
+    const mountEmptyWorkspace = () => {
+      setLoadError(null);
+      clearCurrentModel();
+
+      const wrapper = new THREE.Group();
+      wrapper.name = 'Escena_3D_Wrapper';
+      const cleanRootGroup = new THREE.Group();
+      cleanRootGroup.name = 'Blender_Scene_Root';
+      cleanRootGroup.position.set(0, -1.35, 0);
+      wrapper.add(cleanRootGroup);
+
+      scene.add(wrapper);
+      currentModelWrapper = wrapper;
+      if (sceneRefs.current) {
+        sceneRefs.current.currentModelWrapper = wrapper;
+      }
+
+      setCameraViewPreset('hero');
+      saveMasterDrawingCheckpoint(wrapper);
+      setCanUndo(false);
+      setCanRedo(false);
+      setDecimateFeedback(null);
+
+      setModelStats({
+        name: 'Lienzo_Vacio_Desde_0',
+        triangles: 0,
+        vertices: 0,
+        meshes: 0,
+        isCustomGlb: false,
+      });
+    };
+
     const gltfLoader = new GLTFLoader();
     const dracoLoader = new DRACOLoader();
     dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
@@ -2046,7 +2078,7 @@ export default function App() {
       };
     }
 
-    loadProceduralFallback();
+    mountEmptyWorkspace();
 
     const handleResize = () => {
       if (!container) return;
@@ -2691,41 +2723,60 @@ export default function App() {
   };
 
   // Vacía por completo la escena 3D actual para empezar desde 0 (guardando antes en Deshacer por seguridad)
-  const handleClearSceneFromZero = useCallback(() => {
-    const refs = sceneRefs.current;
-    if (!refs?.currentModelWrapper) return;
-    pushUndoSnapshot(refs.currentModelWrapper);
+  const handleClearSceneFromZero = useCallback(
+    (keepCode?: boolean | React.MouseEvent) => {
+      const shouldKeepCode = keepCode === true;
+      const refs = sceneRefs.current;
+      if (!refs?.currentModelWrapper) return;
 
-    const toRemove: THREE.Object3D[] = [];
-    refs.currentModelWrapper.traverse((child) => {
-      if (child !== refs.currentModelWrapper && (child as THREE.Mesh).isMesh) {
-        toRemove.push(child);
+      let hasExistingMeshes = false;
+      refs.currentModelWrapper.traverse((child) => {
+        if (child !== refs.currentModelWrapper && (child as THREE.Mesh).isMesh) {
+          hasExistingMeshes = true;
+        }
+      });
+
+      if (hasExistingMeshes) {
+        pushUndoSnapshot(refs.currentModelWrapper);
       }
-    });
-    toRemove.forEach((m) => {
-      if (m.parent) m.parent.remove(m);
-      const mesh = m as THREE.Mesh;
-      mesh.geometry?.dispose?.();
-    });
-    while (refs.currentModelWrapper.children.length > 0) {
-      refs.currentModelWrapper.remove(refs.currentModelWrapper.children[0]);
-    }
-    const cleanRootGroup = new THREE.Group();
-    cleanRootGroup.name = 'Blender_Scene_Root';
-    cleanRootGroup.position.set(0, -1.35, 0);
-    refs.currentModelWrapper.add(cleanRootGroup);
 
-    setLastGeneratedPythonCode('');
-    setDecimateFeedback(null);
-    setModelStats({
-      triangles: 0,
-      vertices: 0,
-      meshes: 0,
-      name: 'Lienzo_Vacio_Desde_0.py',
-      isCustomGlb: false,
-    });
-    refs.recalculateStats();
-  }, [pushUndoSnapshot]);
+      const toRemove: THREE.Object3D[] = [];
+      refs.currentModelWrapper.traverse((child) => {
+        if (child !== refs.currentModelWrapper && (child as THREE.Mesh).isMesh) {
+          toRemove.push(child);
+        }
+      });
+      toRemove.forEach((m) => {
+        if (m.parent) m.parent.remove(m);
+        const mesh = m as THREE.Mesh;
+        mesh.geometry?.dispose?.();
+      });
+      while (refs.currentModelWrapper.children.length > 0) {
+        refs.currentModelWrapper.remove(refs.currentModelWrapper.children[0]);
+      }
+      const cleanRootGroup = new THREE.Group();
+      cleanRootGroup.name = 'Blender_Scene_Root';
+      cleanRootGroup.position.set(0, -1.35, 0);
+      refs.currentModelWrapper.add(cleanRootGroup);
+
+      clearBlenderAnimations();
+      refs.resetCyclesAccumulation?.();
+
+      if (!shouldKeepCode) {
+        setLastGeneratedPythonCode('');
+      }
+      setDecimateFeedback(null);
+      setModelStats({
+        triangles: 0,
+        vertices: 0,
+        meshes: 0,
+        name: 'Lienzo_Vacio_Desde_0',
+        isCustomGlb: false,
+      });
+      refs.recalculateStats();
+    },
+    [pushUndoSnapshot]
+  );
 
   // Capturar instantánea del visor 3D actual en base64 para que Gemini vea la pose/forma actual
   const getViewportSnapshot = useCallback((): string | null => {
@@ -3052,9 +3103,10 @@ export default function App() {
     const promptText = (overridePrompt ?? sidebarGeminiPrompt).trim();
     if ((!promptText && !sidebarRefImage) || isSidebarGeminiLoading) return;
 
-    // Si el usuario ha pegado directamente un script Python de Blender 5.2 en la barra lateral, ejecutarlo en local (0 llamadas API)
+    // Si el usuario ha pegado directamente un script Python de Blender 5.2 en la barra lateral, limpiar la pantalla y ejecutarlo en local (0 llamadas API)
     if (isLikelyBlenderPythonCode(promptText)) {
       const cleaned = stripMarkdownCodeFences(promptText);
+      handleClearSceneFromZero(true);
       setLastGeneratedPythonCode(cleaned);
       setSidebarGeminiPrompt('');
       const execResult = await handleRunPythonScript(cleaned, 'Script Blender 5.2 Pegado');
@@ -3083,6 +3135,11 @@ export default function App() {
           ? getViewportSnapshot()
           : null;
       const bounds = getSceneBounds();
+
+      // Si estamos creando desde un texto escrito (modo Nuevo / Reemplazar), limpiar la pantalla inmediatamente
+      if (effectiveMode === 'replace') {
+        handleClearSceneFromZero(true);
+      }
 
       const response = await fetch('/api/gemini/bpy-generator', {
         method: 'POST',
@@ -3208,6 +3265,7 @@ export default function App() {
       if (isLikelyBlenderPythonCode(pasted)) {
         e.preventDefault();
         const cleaned = stripMarkdownCodeFences(pasted);
+        handleClearSceneFromZero(true);
         setLastGeneratedPythonCode(cleaned);
         void handleRunPythonScript(cleaned, 'Script Blender 5.2 (Ctrl+V)').then((res) => {
           if (res.success) {
@@ -5020,12 +5078,19 @@ export default function App() {
                 <textarea
                   rows={2}
                   value={sidebarGeminiPrompt}
-                  onChange={(e) => setSidebarGeminiPrompt(e.target.value)}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val.trim().length > 0 && sidebarGeminiMode === 'replace' && modelStats.meshes > 0) {
+                      handleClearSceneFromZero(true);
+                    }
+                    setSidebarGeminiPrompt(val);
+                  }}
                   onPaste={(e) => {
                     const pasted = e.clipboardData?.getData('text/plain') || '';
                     if (isLikelyBlenderPythonCode(pasted)) {
                       e.preventDefault();
                       const cleaned = stripMarkdownCodeFences(pasted);
+                      handleClearSceneFromZero(true);
                       setLastGeneratedPythonCode(cleaned);
                       setSidebarGeminiPrompt('');
                       void handleRunPythonScript(cleaned, 'Script Blender 5.2 Pegado').then(
@@ -5043,6 +5108,8 @@ export default function App() {
                           }
                         }
                       );
+                    } else if (pasted.trim().length > 0 && sidebarGeminiMode === 'replace' && modelStats.meshes > 0) {
+                      handleClearSceneFromZero(true);
                     }
                   }}
                   onKeyDown={(e) => {

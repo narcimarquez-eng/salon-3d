@@ -97,6 +97,17 @@ export function startBlenderRun(): void {
   pending.length = 0;
 }
 
+/** Limpia todas las animaciones y materiales de agua activos al vaciar la escena 3D. */
+export function clearBlenderAnimations(): void {
+  loops.length = 0;
+  pending.length = 0;
+  for (const w of waters) {
+    w.material.dispose();
+  }
+  waters.length = 0;
+  exportMaterials.clear();
+}
+
 /**
  * Cierra la ejecución: toma la posición final de cada malla (después del auto-escalado del
  * modelo) y aplica el mismo factor a los desplazamientos.
