@@ -116,6 +116,7 @@ def muro_sillares(prefijo, x0, x1, y0, y1, z0, z1, nf, nx, ny, mat):
 m_hormigon = material("MFD_Hormigon", (0.33, 0.33, 0.31, 1.0), 0.9)
 m_sillar = material("MFD_Sillar", (0.58, 0.52, 0.40, 1.0), 0.8)
 m_caliza = material("MFD_Caliza", (0.64, 0.60, 0.50, 1.0), 0.7)
+m_sombra = material("MFD_Sombra", (0.03, 0.03, 0.03, 1.0), 0.9)   # huecos de ojos y boca
 m_sillar.texture = "stone_ashlar"
 
 # ==========================================
@@ -158,10 +159,19 @@ capas("MFD_Fraile_Torso", 18.0, 27.0, 3.2, 1.3, 3.8, 1.4, 0.0, 0.4, 24, 64, m_ca
 esfera("MFD_Fraile_Hombros", (0, 0.4, 27.6), 1.0, m_caliza, (4.2, 1.4, 1.2), 64, 48)
 capas("MFD_Fraile_Cuello", 28.5, 30.4, 0.9, 0.9, 0.9, 0.9, 0.0, 0.5, 6, 48, m_caliza)
 
-# Cabeza y capucha (la capucha envuelve la cabeza y deja ver la cara por delante)
-esfera("MFD_Fraile_Cabeza", (0, 0.5, 33.0), 1.0, m_caliza, (1.25, 1.15, 1.4), 64, 48)
-capas("MFD_Fraile_Capucha", 30.8, 36.4, 1.9, 1.6, 1.6, 1.5, 0.0, 0.5, 18, 64, m_caliza)
-esfera("MFD_Fraile_Rostro", (0, -0.9, 33.2), 0.5, m_caliza, (0.8, 0.45, 1.0), 24, 16)
+# Cabeza dentro de una capucha que queda detrás, y rostro que sale por delante de ella
+esfera("MFD_Fraile_Cabeza", (0, 0.5, 33.0), 1.0, m_caliza, (1.2, 1.1, 1.35), 64, 48)
+capas("MFD_Fraile_Capucha", 30.6, 35.8, 2.0, 1.7, 1.3, 1.2, 0.0, 0.8, 24, 64, m_caliza)
+# Coronilla redondeada: cierra la capucha por arriba en vez de dejar un disco plano
+esfera("MFD_Fraile_Coronilla", (0, 0.8, 35.6), 1.3, m_caliza, (1.0, 0.92, 0.8), 64, 48)
+# Rostro: óvalo con nariz, cejas, ojos y boca. Sobresale unos 0,8 m de la capucha
+esfera("MFD_Fraile_Rostro", (0, -1.0, 33.2), 0.55, m_caliza, (0.85, 0.9, 1.05), 40, 28)
+caja("MFD_Fraile_Nariz", (0, -1.55, 33.0), (0.28, 0.35, 0.8), m_caliza)
+caja("MFD_Fraile_Ceja_Izq", (-0.5, -1.42, 33.7), (0.45, 0.25, 0.15), m_caliza)
+caja("MFD_Fraile_Ceja_Der", (0.5, -1.42, 33.7), (0.45, 0.25, 0.15), m_caliza)
+esfera("MFD_Fraile_Ojo_Izq", (-0.38, -1.5, 33.4), 0.14, m_sombra, (1.0, 0.5, 1.0), 16, 12)
+esfera("MFD_Fraile_Ojo_Der", (0.38, -1.5, 33.4), 0.14, m_sombra, (1.0, 0.5, 1.0), 16, 12)
+caja("MFD_Fraile_Boca", (0, -1.52, 32.5), (0.6, 0.1, 0.1), m_sombra)
 
 # Cordón franciscano por el frente de la falda
 tubo("MFD_Fraile_Cordon", (0, -1.25, 11.0), (0, -1.25, 20.0), 0.13, m_caliza, 12)
