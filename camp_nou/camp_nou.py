@@ -115,7 +115,7 @@ m_grana = material("CN_Grada_Grana", (0.30, 0.01, 0.03, 1.0), 0.6)
 m_cesped = material("CN_Cesped", (0.03, 0.13, 0.02, 1.0), 0.9)
 m_blanco = material("CN_Lineas", (0.90, 0.90, 0.88, 1.0), 0.5)
 m_cristal = material("CN_Fachada_Cristal", (0.55, 0.72, 0.82, 1.0), 0.1, alfa=0.25, barniz=1.0)
-m_etfe = material("CN_Cubierta_ETFE", (0.80, 0.86, 0.90, 1.0), 0.3, alfa=0.4, barniz=0.5)
+m_etfe = material("CN_Cubierta_ETFE", (0.42, 0.50, 0.56, 1.0), 0.3, alfa=0.35, barniz=0.5)
 m_metal = material("CN_Metal", (0.04, 0.04, 0.045, 1.0), 0.45, 1.0)
 
 # Listas de 8 sectores (el motor no admite comprensiones; se escriben a mano)
@@ -127,7 +127,7 @@ etfe8 = [m_etfe, m_etfe, m_etfe, m_etfe, m_etfe, m_etfe, m_etfe, m_etfe]
 # ==========================================
 # 2. CAMPO Y EXPLANADA
 # ==========================================
-caja("CN_Explanada", (0, 0, -0.1), (300, 250, 0.2), m_hormigon)
+caja("CN_Explanada", (0, 0, -0.1), (262, 224, 0.2), m_hormigon)
 caja("CN_Campo", (0, 0, 0.25), (105, 68, 0.3), m_cesped)
 
 caja("CN_Linea_Medio", (0, 0, 0.42), (0.12, 68, 0.04), m_blanco)
