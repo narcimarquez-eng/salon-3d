@@ -103,6 +103,15 @@ por bueno, comprueba que no repite ninguno.
   del puerto conserva las espinillas que la app original se comía (allí el relieve suavizado
   bajaba del umbral de "zona plana"); el resto de la salida coincide pieza a pieza
   (cuerpo + 2 botas, 19 huesos, las mismas 4 animaciones).
+- **Vista de perfil (añadida aquí, no está en Vortex3D):** el molde repartía la profundidad con
+  proporciones fijas (hombros 0,8 · pecho 0,74 · cintura 0,64 · cadera 0,7 del ancho) y los
+  personajes anchos salían planos. Ahora, si hay dibujo de perfil, se mide su anchura fila a
+  fila y se escala la profundidad del cuerpo a esa altura; la forma de la sección no cambia.
+  Las dos vistas se alinean por la altura de la figura, así que da igual a qué tamaño esté
+  dibujado cada panel. Dos trampas: de perfil la melena y los cuernos tapan el cuerpo y lo
+  hacen medir el doble (la cabeza salía como una pelota), por eso se descuentan las clases
+  "pelo" y "pinchos" del mapa de capas del perfil; y el factor se limita a [0,5 · 2,2] por fila
+  para que una fila rara no deforme el cuerpo.
 - Los valores de metal y normales de Vortex3D (1,0 y 1,5) salen de plástico brillante con las
   luces de salon-3d, que no tiene mapa de entorno. Por defecto van a 0,45 y 0,6, y los
   deslizadores llegan al valor original.

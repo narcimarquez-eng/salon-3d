@@ -116,6 +116,12 @@ humano cerrado con profundidad por partes, le busca la cara, le pone botas, un e
 
 - Las fotos deben ser de **cuerpo entero, en pose A y con fondo liso**. El motor trabaja a
   256 px por vista: ese es el techo del detalle.
+- **Dale la vista de perfil siempre que la tengas.** Sin ella el grosor del cuerpo sale de
+  proporciones humanas fijas y el personaje queda plano; con ella se mide fila a fila en el
+  dibujo. En el orco de `humano/orco_perfil/` el fondo pasó de 0,26 a 0,35 veces la altura,
+  que es lo que mide el dibujo (0,32). Da igual el perfil izquierdo o el derecho: solo se mide
+  su anchura. Píntale también su mapa de capas: el pelo y los pinchos se descuentan de la
+  medida (si no, una melena hace que la cabeza salga como una pelota).
 - Código en `src/human/`: `imagePrep.ts` (recorte, silueta, relieve, atlas),
   `humanBodyTemplate.ts` y `humanRig.ts` (copiados de Vortex3D, no los cambies sin mirar
   allí), `buildHuman.ts` (orquesta y monta el material) y `exportHuman.ts` (exporta el .glb
@@ -125,16 +131,19 @@ humano cerrado con profundidad por partes, le busca la cara, le pone botas, un e
   procedimiento, el contorno de tinta y el suavizado de normales lo dejen en paz.
 - **Para el .glb usa el botón del propio panel.** El exportador general reconstruye cada
   malla y dejaría al personaje sin esqueleto.
-- Si las fotos vienen en **una hoja de cuatro paneles**, sepáralas antes con los scripts de la
-  skill `personaje-3d-desde-imagenes` del repo 3d-con-imagenes (`split_sheet.py` y después
-  `limpiar_paneles.py`, que quita los restos del panel vecino; si no, el modelo sale con una
-  repisa plana atravesándolo).
-- Ejemplo hecho así en `humano/orco/`: los cuatro paneles ya limpios, el .glb y sus vistas.
+- Si las fotos vienen en **una hoja de varios paneles**, sepáralas antes con los scripts de la
+  skill `personaje-3d-desde-imagenes` del repo 3d-con-imagenes: `split_sheet.py` para una fila
+  de cuatro, `separar_hoja8.py` para dos filas de cuatro (natural arriba, codificada abajo), y
+  después `limpiar_paneles.py`, que quita los restos del panel vecino; si no, el modelo sale
+  con una repisa plana atravesándolo.
+- Ejemplos: `humano/orco/` (cuatro paneles, sin perfil) y `humano/orco_perfil/` (ocho paneles,
+  con perfil: es el bueno).
 - Prueba de punta a punta (con el servidor en marcha):
   `node .claude/skills/salon3d-glb/scripts/probar_humano.cjs frente.png salida/v1 [espalda.png] [salida.glb]`
   (`ANIM=walk` deja puesta una animación, `SIN_RIG=1` construye sin esqueleto,
   `CAPAS_FRENTE` y `CAPAS_ESPALDA` cargan los mapas pintados, y `METAL`, `NORMALES`,
-  `PROFUNDIDAD`, `RELIEVE`, `CAPAS`, `CARA` y `FILAS` mueven los deslizadores).
+  `PROFUNDIDAD`, `RELIEVE`, `CAPAS`, `CARA`, `FILAS` y `PERFIL_FUERZA` mueven los deslizadores;
+  `PERFIL` y `CAPAS_PERFIL` cargan la vista de perfil).
 - Referencias de peso: unos 35.000 vértices, 68.000 triángulos y 3,4 MB con esqueleto y
   cuatro animaciones. Para meterlo en un juego, pásalo luego por "Optimizar GLB por zonas",
   que conserva huesos y animaciones.

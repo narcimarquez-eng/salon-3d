@@ -11,12 +11,17 @@
 // ============================================================================
 
 import * as THREE from 'three';
-import { buildHumanBodyTemplateGeometry, type HumanBodyLandmarks } from './humanBodyTemplate';
+import {
+  buildHumanBodyTemplateGeometry,
+  maskFromCutoutAndPaint,
+  type HumanBodyLandmarks,
+} from './humanBodyTemplate';
 import {
   createHumanAnimationClips,
   createSkeletonBones,
   type HumanRig,
 } from './humanRig';
+import { LAYER_CLASSES } from './layerMap';
 import {
   ATLAS,
   DEFAULT_CUTOUT,
@@ -37,8 +42,11 @@ export const MAX_HUMAN_VERTICES = 196608;
 export interface HumanImageSet {
   front: HTMLImageElement;
   back?: HTMLImageElement | null;
+  /** Vista de perfil: de ahí sale el grosor real del cuerpo a cada altura. */
+  side?: HTMLImageElement | null;
   frontLayer?: HTMLImageElement | null;
   backLayer?: HTMLImageElement | null;
+  sideLayer?: HTMLImageElement | null;
 }
 
 export interface HumanBuildOptions {
@@ -56,6 +64,8 @@ export interface HumanBuildOptions {
   rig: boolean;
   /** Añadir botas. */
   shoes: boolean;
+  /** Cuánto manda el perfil sobre el grosor del cuerpo (0 = nada, 1 = del todo). */
+  sideStrength: number;
   /** Escala la metalicidad del atlas (1 = igual que Vortex3D). */
   metalMix: number;
   /** Fuerza del mapa de normales. */
@@ -71,6 +81,7 @@ export const DEFAULT_HUMAN_OPTIONS: HumanBuildOptions = {
   layerStrength: 1.0,
   rig: true,
   shoes: true,
+  sideStrength: 1.0,
   // Vortex3D usa 1.0 y 1.5, pero su visor tiene mapa de entorno; con las luces
   // de salon-3d esos valores sacan brillo de plástico y un relieve de textura
   // demasiado marcado. Se bajan por defecto y los deslizadores llegan al valor
@@ -150,7 +161,40 @@ export function buildHumanFromImages(
     );
   }
 
-  // 2. Mapas de capas pintados (opcionales)
+  // 2. Perfil: solo interesa su silueta, para medir el grosor por altura.
+  let sideMask: Uint8Array | null = null;
+  if (images.side) {
+    const side = toTensorPixels(images.side);
+    const sideView = prepareView(side.pixels, false, cut);
+    const sidePaint = images.sideLayer
+      ? loadLayerMap(images.sideLayer, side.crop)
+      : null;
+    let offsets = sidePaint?.offset ?? null;
+    if (offsets) {
+      // De perfil, la melena y los cuernos tapan el cuerpo y lo harían medir
+      // mucho más grueso de lo que es (la cabeza salía como una pelota). Con
+      // el mapa pintado se puede medir solo el cuerpo: fuera pelo y pinchos.
+      const fur = LAYER_CLASSES.find((c) => c.id === 'fur')?.offset;
+      const spikes = LAYER_CLASSES.find((c) => c.id === 'spikes')?.offset;
+      const body = new Float32Array(offsets.length);
+      for (let i = 0; i < offsets.length; i++) {
+        const v = offsets[i];
+        body[i] = Number.isFinite(v) && v !== fur && v !== spikes ? v : NaN;
+      }
+      offsets = body;
+    } else {
+      notes.push(
+        'El perfil se mide con su silueta entera: si tiene melena o cuernos, píntale el mapa de capas del perfil para que no cuenten como cuerpo.'
+      );
+    }
+    sideMask = maskFromCutoutAndPaint(sideView.cutout, TENSOR, offsets);
+  } else {
+    notes.push(
+      'Sin vista de perfil: el grosor del cuerpo sale de proporciones humanas, no del dibujo.'
+    );
+  }
+
+  // 3. Mapas de capas pintados (opcionales)
   let frontLayer: LayerMapBuffers | null = null;
   let backLayer: LayerMapBuffers | null = null;
   if (images.frontLayer) {
@@ -165,10 +209,10 @@ export function buildHumanFromImages(
     );
   }
 
-  // 3. Atlas de textura (frente a la izquierda, espalda a la derecha)
+  // 4. Atlas de textura (frente a la izquierda, espalda a la derecha)
   const atlas = buildAtlas(frontView, backView, options.metalMix);
 
-  // 4. Cuerpo humano ajustado a la silueta
+  // 5. Cuerpo humano ajustado a la silueta
   const geometry = new THREE.BufferGeometry();
   const vertexUsedMask = new Uint8Array(MAX_HUMAN_VERTICES);
   const stats = buildHumanBodyTemplateGeometry(
@@ -181,6 +225,7 @@ export function buildHumanFromImages(
       backLayer,
       frontRelief: frontView.relief,
       backRelief: (backView ?? frontView).relief,
+      sideMask,
       vertexUsedMask,
       maxVertices: MAX_HUMAN_VERTICES,
       atlas: {
@@ -199,6 +244,7 @@ export function buildHumanFromImages(
       layerStrength: Math.max(0, options.layerStrength),
       rig: options.rig,
       shoes: options.shoes,
+      sideStrength: Math.max(0, Math.min(1, options.sideStrength)),
     }
   );
 
@@ -208,7 +254,7 @@ export function buildHumanFromImages(
     );
   }
 
-  // 5. Material: el mismo montaje que el visor de Vortex3D
+  // 6. Material: el mismo montaje que el visor de Vortex3D
   const albedoTex = makeAtlasTexture(atlas.albedo, THREE.SRGBColorSpace);
   const roughMetalTex = makeAtlasTexture(atlas.roughMetal, THREE.NoColorSpace);
   const normalTex = makeAtlasTexture(atlas.normal, THREE.NoColorSpace);
@@ -229,7 +275,7 @@ export function buildHumanFromImages(
   });
   material.name = 'Humano_Foto_PBR';
 
-  // 6. Malla, con esqueleto si se pidió
+  // 7. Malla, con esqueleto si se pidió
   const root = new THREE.Group();
   root.name = 'Humano_Desde_Imagenes';
   let mesh: THREE.Mesh | THREE.SkinnedMesh;

@@ -27,7 +27,7 @@ interface Props {
   onExport: () => void;
 }
 
-type SlotId = 'front' | 'back' | 'frontLayer' | 'backLayer';
+type SlotId = 'front' | 'back' | 'side' | 'frontLayer' | 'backLayer' | 'sideLayer';
 
 interface Slot {
   id: SlotId;
@@ -38,8 +38,10 @@ interface Slot {
 const SLOTS: Slot[] = [
   { id: 'front', label: 'Foto de frente', hint: 'Obligatoria. Cuerpo entero, pose A, fondo liso.' },
   { id: 'back', label: 'Foto de espalda', hint: 'Opcional. Mismo encuadre que la de frente.' },
+  { id: 'side', label: 'Foto de perfil', hint: 'Opcional pero muy recomendable: de ahí sale el grosor real del cuerpo a cada altura. Vale el perfil izquierdo o el derecho, dibujado a la misma altura que el de frente.' },
   { id: 'frontLayer', label: 'Mapa de capas (frente)', hint: 'Opcional. Copia de la foto pintada con colores planos.' },
   { id: 'backLayer', label: 'Mapa de capas (espalda)', hint: 'Opcional. Igual, sobre la foto de espalda.' },
+  { id: 'sideLayer', label: 'Mapa de capas (perfil)', hint: 'Opcional. Afina la silueta del perfil, que es lo que se mide.' },
 ];
 
 function loadImage(file: File): Promise<HTMLImageElement> {
@@ -71,22 +73,28 @@ export default function HumanFromImagesPanel({
   const [images, setImages] = useState<Record<SlotId, HTMLImageElement | null>>({
     front: null,
     back: null,
+    side: null,
     frontLayer: null,
     backLayer: null,
+    sideLayer: null,
   });
   const [names, setNames] = useState<Record<SlotId, string | null>>({
     front: null,
     back: null,
+    side: null,
     frontLayer: null,
     backLayer: null,
+    sideLayer: null,
   });
   const [options, setOptions] = useState<HumanBuildOptions>({ ...DEFAULT_HUMAN_OPTIONS });
   const [showLayerLegend, setShowLayerLegend] = useState(false);
   const inputs = useRef<Record<SlotId, HTMLInputElement | null>>({
     front: null,
     back: null,
+    side: null,
     frontLayer: null,
     backLayer: null,
+    sideLayer: null,
   });
 
   const pick = async (slot: SlotId, file: File | undefined) => {
@@ -253,6 +261,8 @@ export default function HumanFromImagesPanel({
           '100% = igual que Vortex3D. Bájalo si la piel sale con brillo de metal.')}
         {slider('Relieve de textura', 'normalStrength', 0, 2, 0.05, (v) => v.toFixed(2),
           'Fuerza del mapa de normales sacado de la foto. 1,5 es el valor de Vortex3D.')}
+        {slider('Fuerza del perfil', 'sideStrength', 0, 1, 0.05, (v) => `${Math.round(v * 100)}%`,
+          'Cuánto manda el dibujo de perfil sobre el grosor del cuerpo. 0% = proporciones humanas fijas.')}
       </div>
 
       <div className="flex items-center gap-3">
@@ -285,8 +295,10 @@ export default function HumanFromImagesPanel({
             {
               front: images.front,
               back: images.back,
+              side: images.side,
               frontLayer: images.frontLayer,
               backLayer: images.backLayer,
+              sideLayer: images.sideLayer,
             },
             options
           );

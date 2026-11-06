@@ -27,6 +27,13 @@ export interface HumanBodyInputs {
   /** Normalised photo relief of the front / back image, size w*w. */
   frontRelief: Float32Array;
   backRelief: Float32Array;
+  /**
+   * Silueta de la vista de perfil, en un tensor del mismo tamaño. Da el grosor
+   * real (de delante a atrás) a cada altura, en vez de deducirlo de
+   * proporciones humanas fijas. Da igual si el perfil mira a izquierda o a
+   * derecha: solo se mide su anchura fila a fila.
+   */
+  sideMask?: Uint8Array | null;
   /** Marks which vertices are in use (the viewport reads it). */
   vertexUsedMask: Uint8Array;
   maxVertices: number;
@@ -59,6 +66,8 @@ export interface HumanBodyOptions {
   faceDetail?: number;
   /** Add shoes (flat sole, toe forward). Default true. */
   shoes?: boolean;
+  /** Cuánto manda el perfil sobre el grosor del cuerpo (0 = nada, 1 = del todo). */
+  sideStrength?: number;
 }
 
 export interface HumanBodyLandmarks {
@@ -440,7 +449,93 @@ function detectFace(
 /**
  * Builds the half-thickness map (in texels) of a human body that fills the silhouette.
  */
-function buildHumanDepthMap(mask: Uint8Array, w: number, rgb?: Float32Array): HumanBodyLandmarks {
+/**
+ * Grosor del cuerpo a cada altura, medido en la silueta de perfil.
+ *
+ * Las dos vistas se dibujan con el personaje a la misma altura, así que para
+ * pasar una medida del perfil a las unidades de la vista de frente basta con
+ * la razón entre las alturas de la figura en cada una. Devuelve el SEMI-grosor
+ * (que es lo que guarda el mapa de profundidad) por fila de la vista de frente,
+ * o null si el perfil no tiene silueta aprovechable.
+ */
+function sideHalfThicknessByRow(
+  sideMask: Uint8Array,
+  w: number,
+  top: number,
+  bottom: number
+): Float32Array | null {
+  const minX = new Int32Array(w).fill(-1);
+  const maxX = new Int32Array(w).fill(-1);
+  let sTop = -1;
+  let sBot = -1;
+  for (let y = 0; y < w; y++) {
+    let a = -1;
+    let b = -1;
+    for (let x = 0; x < w; x++) {
+      if (sideMask[y * w + x] !== 1) continue;
+      if (a < 0) a = x;
+      b = x;
+    }
+    minX[y] = a;
+    maxX[y] = b;
+    if (a >= 0) {
+      if (sTop < 0) sTop = y;
+      sBot = y;
+    }
+  }
+  const Hf = bottom - top + 1;
+  const Hs = sBot - sTop + 1;
+  if (sTop < 0 || Hs < 8 || Hf < 8) return null;
+
+  const k = Hf / Hs;
+  const acc = new Float32Array(w);
+  const cnt = new Float32Array(w);
+  for (let ys = sTop; ys <= sBot; ys++) {
+    if (minX[ys] < 0) continue;
+    const t = (ys - sTop) / Math.max(1, Hs - 1);
+    const yf = Math.round(top + t * (Hf - 1));
+    if (yf < 0 || yf >= w) continue;
+    acc[yf] += ((maxX[ys] - minX[ys] + 1) * k) / 2;
+    cnt[yf] += 1;
+  }
+
+  const out = new Float32Array(w).fill(NaN);
+  for (let y = top; y <= bottom; y++) if (cnt[y] > 0) out[y] = acc[y] / cnt[y];
+
+  // Rellena las filas sin medida (cuando el perfil es más corto que el frente)
+  // interpolando entre las vecinas que sí la tienen.
+  let prev = -1;
+  for (let y = top; y <= bottom; y++) {
+    if (!Number.isFinite(out[y])) continue;
+    if (prev >= 0 && y - prev > 1) {
+      for (let q = prev + 1; q < y; q++) {
+        const t = (q - prev) / (y - prev);
+        out[q] = out[prev] * (1 - t) + out[y] * t;
+      }
+    }
+    prev = y;
+  }
+  let first = -1;
+  let last = -1;
+  for (let y = top; y <= bottom; y++) {
+    if (!Number.isFinite(out[y])) continue;
+    if (first < 0) first = y;
+    last = y;
+  }
+  if (first < 0) return null;
+  for (let y = top; y < first; y++) out[y] = out[first];
+  for (let y = last + 1; y <= bottom; y++) out[y] = out[last];
+  smooth1D(out, top, bottom, 2);
+  return out;
+}
+
+function buildHumanDepthMap(
+  mask: Uint8Array,
+  w: number,
+  rgb?: Float32Array,
+  sideMask?: Uint8Array | null,
+  sideStrength = 1
+): HumanBodyLandmarks {
   distanceAndRadius(mask, w);
 
   // --- Landmarks -----------------------------------------------------------
@@ -640,6 +735,41 @@ function buildHumanDepthMap(mask: Uint8Array, w: number, rgb?: Float32Array): Hu
     }
   }
 
+  // --- Pass 1.5: grosor medido en la vista de perfil ------------------------
+  // El molde reparte la profundidad por partes con proporciones humanas fijas
+  // (hombros 0,8 · pecho 0,74 · cintura 0,64 · cadera 0,7 del ancho). Si hay
+  // dibujo de perfil, ese grosor se sustituye por el real a cada altura: se
+  // compara con el que ha salido y se escala la fila entera. La forma de la
+  // sección (ovalada, superelíptica, cilindros) no cambia; solo cuánto sobresale.
+  if (sideMask && sideStrength > 0.001) {
+    const meas = sideHalfThicknessByRow(sideMask, w, top, bottom);
+    if (meas) {
+      const strength = Math.max(0, Math.min(1, sideStrength));
+      const scale = new Float32Array(w).fill(1);
+      for (let y = top; y <= bottom; y++) {
+        let model = 0;
+        for (let x = 0; x < w; x++) {
+          const i = y * w + x;
+          if (_coreMask[i] === 1 && D[i] > model) model = D[i];
+        }
+        if (model < 0.6 || !Number.isFinite(meas[y]) || meas[y] <= 0) continue;
+        // Los topes evitan que una fila rara (un mechón de pelo suelto en el
+        // perfil, o una fila casi vacía) deforme el cuerpo.
+        scale[y] = Math.max(0.5, Math.min(2.2, meas[y] / model));
+      }
+      smooth1D(scale, top, bottom, 3);
+      for (let y = top; y <= bottom; y++) {
+        const s = 1 + (scale[y] - 1) * strength;
+        if (Math.abs(s - 1) < 0.002) continue;
+        for (let x = 0; x < w; x++) {
+          const i = y * w + x;
+          if (_coreMask[i] === 1) D[i] *= s;
+        }
+        _rowCoreDepth[y] *= s;
+      }
+    }
+  }
+
   // --- Pass 2: arms, shoulder pads and everything else ------------------------
   // Their thickness comes from their own shape (the silhouette minus the core),
   // so a shoulder pad attached to the torso does not inherit the torso's depth.
@@ -739,6 +869,49 @@ function removeFloorBridge(mask: Uint8Array, w: number) {
 }
 
 /** Keeps only the largest 4-connected region of a mask (in place). */
+/**
+ * Silueta de una vista a partir de su recorte automático y, si lo hay, de su
+ * mapa de capas pintado: lo pintado manda (recupera cuernos y pinchos finos) y
+ * del recorte solo se acepta lo que queda a 2 px o menos de la pintura.
+ * Es la misma regla que usa la vista de frente.
+ */
+export function maskFromCutoutAndPaint(
+  cutout: Uint8Array,
+  w: number,
+  paintedOffsets?: Float32Array | null
+): Uint8Array {
+  const out = new Uint8Array(w * w);
+  if (!paintedOffsets) {
+    out.set(cutout);
+    keepLargestComponent(out, w);
+    return out;
+  }
+  const painted = new Uint8Array(w * w);
+  for (let i = 0; i < w * w; i++) if (Number.isFinite(paintedOffsets[i])) painted[i] = 1;
+  let near = painted.slice();
+  for (let r = 0; r < 2; r++) {
+    const prev = near;
+    near = prev.slice();
+    for (let y = 0; y < w; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = y * w + x;
+        if (prev[i]) continue;
+        if (
+          (x > 0 && prev[i - 1]) ||
+          (x < w - 1 && prev[i + 1]) ||
+          (y > 0 && prev[i - w]) ||
+          (y < w - 1 && prev[i + w])
+        ) {
+          near[i] = 1;
+        }
+      }
+    }
+  }
+  for (let i = 0; i < w * w; i++) out[i] = painted[i] || (cutout[i] && near[i]) ? 1 : 0;
+  keepLargestComponent(out, w);
+  return out;
+}
+
 function keepLargestComponent(mask: Uint8Array, w: number) {
   const n = w * w;
   const label = new Int32Array(n).fill(-1);
@@ -1094,7 +1267,13 @@ export function buildHumanBodyTemplateGeometry(
   removeFloorBridge(mask, w);
 
   // The depth map is computed before the outline field because both use _tmp.
-  const landmarks = buildHumanDepthMap(mask, w, inputs.frontRgb);
+  const landmarks = buildHumanDepthMap(
+    mask,
+    w,
+    inputs.frontRgb,
+    inputs.sideMask ?? null,
+    options.sideStrength ?? 1
+  );
   if (inputs.atlas) {
     repairAtlasRim(inputs.atlas, mask, w);
     if (inputs.atlas.roughMetal) smoothRoughMetal(inputs.atlas.roughMetal, inputs.atlas.atlasWidth, mask, w);
