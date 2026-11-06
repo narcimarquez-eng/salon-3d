@@ -150,6 +150,16 @@ import PythonScriptModal, {
 import MyTexturesPanel from './components/MyTexturesPanel';
 import GlbZonesPanel, { GlbSource } from './components/GlbZonesPanel';
 import MonsterLoaderPanel from './components/MonsterLoaderPanel';
+import HumanFromImagesPanel, {
+  HumanPanelResult,
+} from './components/HumanFromImagesPanel';
+import {
+  buildHumanFromImages,
+  type HumanBuildOptions,
+  type HumanImageSet,
+} from './human/buildHuman';
+import { downloadHumanGLB } from './human/exportHuman';
+import { RIG_ANIMATIONS, clipNameForAnimation } from './human/humanRig';
 import {
   ColorMapTextureInfo,
   ColorMapSet,
@@ -280,6 +290,14 @@ export default function App() {
   const [userColorTileMeters, setUserColorTileMeters] = useState<number>(3);
   // GLB original subido por el usuario, para el optimizador por zonas (la vista previa no lo sustituye)
   const [sourceGlb, setSourceGlb] = useState<GlbSource | null>(null);
+
+  // --- Personaje humano desde fotos (panel "Humano desde imágenes") ---
+  const [humanBusy, setHumanBusy] = useState<boolean>(false);
+  const [humanResult, setHumanResult] = useState<HumanPanelResult | null>(null);
+  const [humanError, setHumanError] = useState<string | null>(null);
+  const [humanExporting, setHumanExporting] = useState<boolean>(false);
+  const [humanExportSize, setHumanExportSize] = useState<string | null>(null);
+  const [humanAnimation, setHumanAnimation] = useState<string>('idle');
   const [textureCategoryFilter, setTextureCategoryFilter] = useState<'all' | TextureCategoryType>('all');
   const [textureRepeatScale, setTextureRepeatScale] = useState<number>(2);
   const [textureBumpIntensity, setTextureBumpIntensity] = useState<number>(1.0);
@@ -400,6 +418,16 @@ export default function App() {
     currentModelWrapper: THREE.Group | null;
     loadGlbFromFile: (file: File) => void;
     loadProceduralFallback: () => void;
+    mountHumanObject: (
+      root: THREE.Object3D,
+      fileName: string,
+      clips: THREE.AnimationClip[]
+    ) => void;
+    setHumanAnimation: (animationId: string) => void;
+    getHumanExportTarget: () => {
+      root: THREE.Object3D | null;
+      clips: THREE.AnimationClip[];
+    };
     setCameraViewPreset: (preset: CameraPresetType) => void;
     recalculateStats: () => void;
     captureScreenshot: () => void;
@@ -659,6 +687,10 @@ export default function App() {
         const mesh = child as THREE.Mesh;
         // Ignorar mallas de agua con ShaderMaterial animado propio
         if ((mesh.material as THREE.Material)?.type === 'ShaderMaterial') return;
+        // Los personajes hechos desde fotos traen su propio juego de mapas
+        // (color, normales y rugosidad/metal sacados de la imagen). Las
+        // texturas de procedimiento los borrarían.
+        if (mesh.userData.photoHuman) return;
 
         const origHex = (mesh.userData.originalColorHex as string) || '#e11d48';
         const hasPerMeshTex = Boolean(mesh.userData.hasPerMeshTexture && mesh.userData.originalMap);
@@ -1227,6 +1259,9 @@ export default function App() {
 
     let currentModelWrapper: THREE.Group | null = null;
     let currentMixer: THREE.AnimationMixer | null = null;
+    // Personaje humano activo hecho desde fotos, con sus clips de animación.
+    let humanClips: THREE.AnimationClip[] = [];
+    let humanRoot: THREE.Object3D | null = null;
 
     const recalculateStats = () => {
       if (!currentModelWrapper) return;
@@ -1266,6 +1301,8 @@ export default function App() {
         currentMixer.stopAllAction();
         currentMixer = null;
       }
+      humanClips = [];
+      humanRoot = null;
       if (currentModelWrapper) {
         scene.remove(currentModelWrapper);
         currentModelWrapper.traverse((obj) => {
@@ -1315,14 +1352,17 @@ export default function App() {
       rawRoot: THREE.Object3D,
       fileName: string,
       isCustom: boolean,
-      animations: THREE.AnimationClip[] = []
+      animations: THREE.AnimationClip[] = [],
+      // Los personajes de foto se montan sin suavizar normales: su relieve ya
+      // viene medido de la imagen y el suavizado se lo comería.
+      normalSmoothingOverride?: number
     ) => {
       clearCurrentModel();
 
       const { wrapper, triangleCount, vertexCount, meshCount } = setupStylizedEnemyModel(
         rawRoot,
         gradientTexture,
-        settingsRef.current.normalSmoothing,
+        normalSmoothingOverride ?? settingsRef.current.normalSmoothing,
         settingsRef.current.outlineThickness,
         settingsRef.current.outlineOpacity,
         settingsRef.current.matcapPreset
@@ -1360,6 +1400,46 @@ export default function App() {
       const fallbackGroup = createLowPolyEnemyFallback();
       mountProcessedObject(fallbackGroup, 'Golem_Enemigo_LowPoly.glb (Demo)', false);
     };
+
+    // ---- Personaje humano hecho desde fotos (ver src/human/) ----
+    // Se guarda aparte del resto porque sus animaciones se eligen a mano y su
+    // exportación conserva el esqueleto.
+    const mountHumanObject = (
+      root: THREE.Object3D,
+      fileName: string,
+      clips: THREE.AnimationClip[]
+    ) => {
+      setLoadError(null);
+      // mountProcessedObject limpia el modelo anterior (y con él el humano
+      // anterior), así que el nuevo se registra después.
+      mountProcessedObject(root, fileName, true, [], 0);
+      humanClips = clips;
+      humanRoot = root;
+      if (clips.length > 0) {
+        currentMixer = new THREE.AnimationMixer(root);
+      }
+    };
+
+    const setHumanAnimation = (animationId: string) => {
+      const clipName = clipNameForAnimation(animationId);
+      if (currentMixer) currentMixer.stopAllAction();
+      if (!clipName) {
+        // Pose de reposo: cada hueso vuelve a donde se ató.
+        humanRoot?.traverse((o) => {
+          const bone = o as THREE.Bone;
+          if (bone.isBone && Array.isArray(bone.userData.bindPosition)) {
+            bone.position.fromArray(bone.userData.bindPosition as number[]);
+            bone.quaternion.identity();
+            bone.scale.set(1, 1, 1);
+          }
+        });
+        return;
+      }
+      const clip = humanClips.find((c) => c.name === clipName);
+      if (clip && currentMixer) currentMixer.clipAction(clip).reset().play();
+    };
+
+    const getHumanExportTarget = () => ({ root: humanRoot, clips: humanClips });
 
     const mountEmptyWorkspace = () => {
       setLoadError(null);
@@ -2024,6 +2104,9 @@ export default function App() {
       currentModelWrapper,
       loadGlbFromFile,
       loadProceduralFallback,
+      mountHumanObject,
+      setHumanAnimation,
+      getHumanExportTarget,
       setCameraViewPreset,
       recalculateStats,
       captureScreenshot,
@@ -2473,6 +2556,80 @@ export default function App() {
   };
 
   // Aplica (o quita, con null) una textura de "Mis texturas" como mapa de color del modelo actual
+  // ---- Personaje humano desde fotos ----
+  const handleBuildHuman = (images: HumanImageSet, options: HumanBuildOptions) => {
+    const refs = sceneRefs.current;
+    if (!refs || humanBusy) return;
+    setHumanBusy(true);
+    setHumanError(null);
+    // La reconstrucción es síncrona y tarda un par de segundos: se le deja un
+    // fotograma al navegador para que pinte "Construyendo..." antes de empezar.
+    window.setTimeout(() => {
+      try {
+        const built = buildHumanFromImages(images, options);
+        refs.mountHumanObject(built.root, 'Humano_Desde_Fotos', built.clips);
+        const hasRig = built.clips.length > 0;
+        setHumanResult({
+          vertexCount: built.vertexCount,
+          triangleCount: built.triangleCount,
+          notes: built.notes,
+          hasRig,
+          animations: RIG_ANIMATIONS.map((a) => ({ id: a.id, label: a.label })),
+        });
+        // El personaje se mira con su material PBR de la foto, sin cel-shading
+        // ni suavizado de normales, que es lo que le da el aspecto de Vortex3D.
+        setSettings((prev) => ({
+          ...prev,
+          shadingMode: 'original',
+          normalSmoothing: 0,
+        }));
+        const first = hasRig ? 'idle' : 'rest';
+        setHumanAnimation(first);
+        refs.setHumanAnimation(first);
+        setHumanExportSize(null);
+      } catch (err: unknown) {
+        console.error('Error al construir el personaje:', err);
+        setHumanError(err instanceof Error ? err.message : String(err));
+        setHumanResult(null);
+      } finally {
+        setHumanBusy(false);
+      }
+    }, 30);
+  };
+
+  const handleHumanAnimationChange = (animationId: string) => {
+    setHumanAnimation(animationId);
+    sceneRefs.current?.setHumanAnimation(animationId);
+  };
+
+  const handleExportHuman = async () => {
+    const refs = sceneRefs.current;
+    if (!refs || humanExporting) return;
+    const { root, clips } = refs.getHumanExportTarget();
+    if (!root) {
+      setHumanError('El personaje ya no está en la escena. Vuelve a crearlo.');
+      return;
+    }
+    setHumanExporting(true);
+    setHumanError(null);
+    try {
+      const bytes = await downloadHumanGLB(root, clips, 'humano_desde_fotos.glb');
+      const mb = bytes / (1024 * 1024);
+      setHumanExportSize(
+        mb >= 1 ? `${mb.toFixed(2)} MB` : `${Math.round(bytes / 1024)} KB`
+      );
+    } catch (err: unknown) {
+      console.error('Error al exportar el personaje:', err);
+      setHumanError(
+        `No se ha podido exportar el .glb: ${
+          err instanceof Error ? err.message : String(err)
+        }`
+      );
+    } finally {
+      setHumanExporting(false);
+    }
+  };
+
   const handleApplyUserTexture = async (info: ColorMapTextureInfo | null) => {
     if (!info) {
       setUserColorTextureInfo(null);
@@ -5356,6 +5513,19 @@ export default function App() {
                   setSourceGlb(src);
                   sceneRefs.current?.loadGlbFromFile(src.file);
                 }}
+              />
+
+              {/* Humano desde imágenes: reconstrucción fotográfica con esqueleto */}
+              <HumanFromImagesPanel
+                busy={humanBusy}
+                result={humanResult}
+                error={humanError}
+                exporting={humanExporting}
+                lastExportSize={humanExportSize}
+                activeAnimation={humanAnimation}
+                onBuild={handleBuildHuman}
+                onAnimationChange={handleHumanAnimationChange}
+                onExport={handleExportHuman}
               />
 
               {/* Optimizador por zonas: solo aparece con un GLB subido por el usuario */}

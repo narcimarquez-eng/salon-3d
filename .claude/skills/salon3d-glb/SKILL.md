@@ -105,6 +105,33 @@ node .claude/skills/salon3d-glb/scripts/capturar_y_exportar.cjs <tema>/<tema>.py
   para que el juego dibuje solo lo cercano, y usa luces emisivas en vez de muchas luces reales.
 - Cilindros con 8–12 lados para piezas repetidas; 32–48 solo en objetos protagonistas y cercanos.
 
+## Humanos desde fotos (panel "Humano desde imágenes")
+
+Para un **personaje humano a partir de fotos** no se escribe un script: se usa el panel
+"Humano desde imágenes", que trae el motor portado de la app Vortex3D
+(`narcimarquez-eng/3d-con-imagenes`). Se le dan una foto de frente (obligatoria) y, si se
+tienen, la de espalda y los mapas de capas pintados; saca la silueta, le ajusta un cuerpo
+humano cerrado con profundidad por partes, le busca la cara, le pone botas, un esqueleto de
+19 huesos con cuatro animaciones y la textura de la propia foto.
+
+- Las fotos deben ser de **cuerpo entero, en pose A y con fondo liso**. El motor trabaja a
+  256 px por vista: ese es el techo del detalle.
+- Código en `src/human/`: `imagePrep.ts` (recorte, silueta, relieve, atlas),
+  `humanBodyTemplate.ts` y `humanRig.ts` (copiados de Vortex3D, no los cambies sin mirar
+  allí), `buildHuman.ts` (orquesta y monta el material) y `exportHuman.ts` (exporta el .glb
+  conservando esqueleto, animaciones y mapas).
+- El personaje se monta con su material PBR de foto y la app cambia sola a "📐 PBR Base" con
+  el suavizado de normales a 0. Lleva `userData.photoHuman`, que hace que las texturas de
+  procedimiento, el contorno de tinta y el suavizado de normales lo dejen en paz.
+- **Para el .glb usa el botón del propio panel.** El exportador general reconstruye cada
+  malla y dejaría al personaje sin esqueleto.
+- Prueba de punta a punta (con el servidor en marcha):
+  `node .claude/skills/salon3d-glb/scripts/probar_humano.cjs frente.png salida/v1 [espalda.png] [salida.glb]`
+  (`ANIM=walk` deja puesta una animación, `SIN_RIG=1` construye sin esqueleto).
+- Referencias de peso: unos 35.000 vértices, 68.000 triángulos y 3,4 MB con esqueleto y
+  cuatro animaciones. Para meterlo en un juego, pásalo luego por "Optimizar GLB por zonas",
+  que conserva huesos y animaciones.
+
 ## Otras tareas con GLB en la app
 
 - **Texturizar u optimizar un GLB importado** (también monstruos): panel "Optimizar GLB por

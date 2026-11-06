@@ -79,7 +79,35 @@ por bueno, comprueba que no repite ninguno.
   nuevos.
 - Los 282 monstruos se generan sin errores: Low 46 s y 333 MB en total; Medium 70 s y 558 MB.
 
-## 6. Modelos de referencia en el repo
+## 6. Humanos desde fotos (puerto del motor de Vortex3D)
+
+- **`userData` se cuela entera en el .glb.** GLTFExporter serializa `userData` de cada objeto
+  como `extras`. El visor cuelga ahí las posiciones originales y la pila de deshacer, así que
+  el primer personaje exportado pesó **103 MB** (86 MB solo de JSON) en vez de 3,4. El
+  exportador del panel vacía `userData` en la copia que exporta, nunca en la escena.
+- **`prepareGeometryNormals` separa la geometría por caras** (`toNonIndexed`), lo que
+  multiplica por seis los vértices. Los personajes de foto (y cualquier malla con esqueleto)
+  se lo saltan: sus normales ya vienen medidas de la imagen.
+- **Las texturas de procedimiento pisaban el material de la foto.** El efecto que aplica los
+  presets de textura escribe `map`, `normalMap`, `roughnessMap` y `bumpScale` sobre
+  `userData.originalMaterial`, y con el preset "ninguna" los dejaba a null: el .glb salía sin
+  mapa de normales. Se arregló con la marca `userData.photoHuman`.
+- **`SkeletonUtils.clone` comparte la geometría con la escena**: si el exportador le borra un
+  atributo, se lo borra al modelo que se está viendo. Hay que clonar la geometría antes.
+- **El contorno de tinta** (malla invertida) no se crea en mallas con esqueleto (se quedaría
+  quieto al animar) y se quita del .glb.
+- Qué **no** se portó del motor original: el solucionador de Poisson, las formas preset y la
+  tira lateral de unión. El relieve que recibe el molde es el mapa de brillo normalizado;
+  `addPhotoDetail` ya le aplica un paso alto, así que la parte de baja frecuencia que ponía
+  Poisson se descartaba igual. Efecto medible: con el mismo personaje de prueba, el recorte
+  del puerto conserva las espinillas que la app original se comía (allí el relieve suavizado
+  bajaba del umbral de "zona plana"); el resto de la salida coincide pieza a pieza
+  (cuerpo + 2 botas, 19 huesos, las mismas 4 animaciones).
+- Los valores de metal y normales de Vortex3D (1,0 y 1,5) salen de plástico brillante con las
+  luces de salon-3d, que no tiene mapa de entorno. Por defecto van a 0,45 y 0,6, y los
+  deslizadores llegan al valor original.
+
+## 7. Modelos de referencia en el repo
 
 Mira el script más parecido antes de empezar uno nuevo:
 

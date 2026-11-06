@@ -355,8 +355,15 @@ export function setupStylizedEnemyModel(
     mesh.castShadow = true;
     mesh.receiveShadow = true;
 
-    // 2. Preparar suavizado de normales (Vertex Normal Blending)
-    prepareGeometryNormals(mesh);
+    // 2. Preparar suavizado de normales (Vertex Normal Blending).
+    // Las mallas con esqueleto se saltan este paso: separar la geometría por
+    // caras multiplicaría por seis sus vértices (y el peso del .glb), y sus
+    // normales ya vienen medidas de la foto, no hay nada que suavizar.
+    // Los personajes hechos desde fotos se saltan este paso igual: sus normales
+    // ya vienen medidas de la imagen.
+    if (!(mesh as THREE.SkinnedMesh).isSkinnedMesh && !mesh.userData.photoHuman) {
+      prepareGeometryNormals(mesh);
+    }
 
     const posAttr = mesh.geometry.attributes.position as THREE.BufferAttribute;
     // Guardar copia pristina de las posiciones iniciales para poder Restaurar / Deshacer
@@ -446,6 +453,9 @@ export function setupStylizedEnemyModel(
     mesh.material = toonMaterial;
 
     // 4. Crear malla secundaria para el contorno de tinta (Inverted Hull Outline Shader)
+    // En mallas con esqueleto se salta: el contorno comparte la geometría en pose
+    // de reposo y, al animar, se quedaría quieto como un fantasma detrás.
+    if ((mesh as THREE.SkinnedMesh).isSkinnedMesh) continue;
     const outlineMat = createComicOutlineMaterial(outlineThickness, outlineOpacity);
     const outlineMesh = new THREE.Mesh(mesh.geometry, outlineMat);
     outlineMesh.name = `${mesh.name}_outline`;
