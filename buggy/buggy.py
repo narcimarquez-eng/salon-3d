@@ -246,17 +246,17 @@ def rueda(nombre, xw, yw):
 # ==========================================
 # 1. MATERIALES (pocos y compartidos: cada material es una pieza al exportar)
 # ==========================================
-m_cromoly = material("TB_Cromoly_4130", (0.22, 0.22, 0.23, 1.0), 0.4, 0.9)
+m_cromoly = material("TB_Cromoly_4130", (0.07, 0.07, 0.075, 1.0), 0.5, 0.6)
 m_soldadura = material("TB_Soldadura_TIG", (0.12, 0.07, 0.04, 1.0), 0.5, 0.7)
 m_carbono = material("TB_Carbono_Mate", (0.02, 0.02, 0.022, 1.0), 0.7, 0.1)
 m_carbono.texture = "carbon_weave"
 m_aluminio = material("TB_Aluminio_Cepillado", (0.62, 0.63, 0.65, 1.0), 0.32, 1.0)
 m_azul = material("TB_Deposito_Azul", (0.03, 0.09, 0.42, 1.0), 0.3, 0.6, 1.0, 0.3)
 m_resorte = material("TB_Muelle", (0.45, 0.3, 0.08, 1.0), 0.35, 1.0)
-m_arnes = material("TB_Arnes_Tejido", (0.05, 0.05, 0.05, 1.0), 0.8)
+m_arnes = material("TB_Arnes_Tejido", (0.5, 0.03, 0.02, 1.0), 0.8)
 m_arnes.texture = "woven_linen"
 m_neumatico = material("TB_Neumatico", (0.012, 0.012, 0.012, 1.0), 0.9)
-m_llanta = material("TB_Llanta_Forjada", (0.08, 0.08, 0.09, 1.0), 0.3, 0.9)
+m_llanta = material("TB_Llanta_Bronce", (0.32, 0.2, 0.09, 1.0), 0.35, 0.9)
 m_cromo = material("TB_Cromo", (0.8, 0.81, 0.83, 1.0), 0.12, 1.0)
 m_disco = material("TB_Disco_Acero", (0.3, 0.3, 0.31, 1.0), 0.45, 0.9)
 m_caliper = material("TB_Pinza_Roja", (0.55, 0.02, 0.02, 1.0), 0.35, 0.2)
@@ -265,7 +265,7 @@ m_pantalla = material("TB_Pantalla_Digital", (0.05, 0.5, 0.9, 1.0), 0.3, 0.0, 1.
 m_luz = material("TB_Luz_LED", (1.0, 0.95, 0.85, 1.0), 0.3, 0.0, 1.0, 0.0, 4.0)
 m_piloto = material("TB_Piloto_Rojo", (0.9, 0.02, 0.01, 1.0), 0.3, 0.0, 1.0, 0.0, 2.0)
 m_titan = material("TB_Titanio_Azulado", (0.2, 0.22, 0.36, 1.0), 0.35, 0.9)
-m_silicona = material("TB_Silicona_Roja", (0.5, 0.03, 0.02, 1.0), 0.5)
+m_silicona = material("TB_Silicona_Azul", (0.02, 0.06, 0.55, 1.0), 0.5)
 
 # ==========================================
 # 2. CHASIS ESPACIAL (tubo 4130 con soldaduras)
@@ -380,7 +380,7 @@ for q in range(2):
 caja("Morro_Carbono", (0, -1.45, 0.72), (0.95, 0.85, 0.22), m_carbono)
 caja("Parachoques_Aluminio", (0, -1.9, 0.5), (1.2, 0.06, 0.2), m_aluminio)
 caja("Barra_LED", (0, -1.91, 0.7), (0.8, 0.02, 0.04), m_luz)
-caja("Tablero_Carbono", (0, -0.7, 0.78), (0.9, 0.12, 0.2), m_carbono)
+caja("Tablero_Aluminio", (0, -0.7, 0.78), (0.9, 0.12, 0.2), m_aluminio)
 for q in range(2):
     s = 1 - 2 * q
     for j in range(2):
@@ -444,3 +444,34 @@ caja("Freno_Empunadura", (-0.55, -0.22, 1.02), (0.05, 0.05, 0.12), m_carbono)
 cilindro_entre("Pantalla_Soporte", [0.0, -0.5, 1.35], [0.0, -0.6, 1.3], 0.014, m_cromoly, 10)
 caja("Pantalla_Marco", (0, -0.6, 1.22), (0.36, 0.03, 0.18), m_negro)
 caja("Pantalla_Digital", (0, -0.615, 1.22), (0.32, 0.01, 0.14), m_pantalla)
+
+# ==========================================
+# 9. DETALLES DE LA FOTO DE REFERENCIA
+# ==========================================
+# Paneles laterales de aluminio cepillado con remaches entre los pilares
+for q in range(2):
+    s = 1 - 2 * q
+    caja("Panel_Lateral_Aluminio_" + str(q), (s * 0.53, -0.1, 0.8), (0.02, 1.6, 0.55), m_aluminio)
+    for j in range(6):
+        yr = -0.8 + 0.3 * j
+        cilindro("Remache_Lateral_" + str(q) + "_" + str(j), (s * 0.545, yr, 0.6), 0.008, 0.01, m_cromo, vertices=6, rot=(0, math.pi / 2, 0))
+        cilindro("Remache_Lateral_Alto_" + str(q) + "_" + str(j), (s * 0.545, yr, 1.05), 0.008, 0.01, m_cromo, vertices=6, rot=(0, math.pi / 2, 0))
+
+# Radiador de aluminio en la parte delantera alta, con dos ventiladores
+caja("Radiador", (0, -0.6, 1.7), (1.0, 0.08, 0.45), m_aluminio)
+for q in range(2):
+    s = 1 - 2 * q
+    cilindro("Ventilador_" + str(q), (s * 0.25, -0.66, 1.7), 0.2, 0.06, m_negro, vertices=20, rot=(math.pi / 2, 0, 0))
+    aro("Ventilador_Aro_" + str(q), (s * 0.25, -0.67, 1.7), 0.2, 0.012, m_negro, rot=(math.pi / 2, 0, 0))
+
+# Dos neumaticos de repuesto planos sobre el techo
+for q in range(2):
+    s = 1 - 2 * q
+    aro("Repuesto_Techo_" + str(q), (s * 0.45, 0.2, 1.9), 0.3, 0.12, m_neumatico)
+    cilindro("Repuesto_Techo_Llanta_" + str(q), (s * 0.45, 0.2, 1.9), 0.18, 0.2, m_llanta, vertices=20)
+
+# Barra LED de techo y antenas
+caja("Barra_LED_Techo", (0, -0.6, 1.98), (0.8, 0.04, 0.06), m_luz)
+for q in range(2):
+    s = 1 - 2 * q
+    cilindro_entre("Antena_" + str(q), [s * 0.9, 0.6, 1.85], [s * 0.9, 0.6, 2.6], 0.01, m_negro, 6)
