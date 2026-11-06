@@ -125,9 +125,16 @@ humano cerrado con profundidad por partes, le busca la cara, le pone botas, un e
   procedimiento, el contorno de tinta y el suavizado de normales lo dejen en paz.
 - **Para el .glb usa el botón del propio panel.** El exportador general reconstruye cada
   malla y dejaría al personaje sin esqueleto.
+- Si las fotos vienen en **una hoja de cuatro paneles**, sepáralas antes con los scripts de la
+  skill `personaje-3d-desde-imagenes` del repo 3d-con-imagenes (`split_sheet.py` y después
+  `limpiar_paneles.py`, que quita los restos del panel vecino; si no, el modelo sale con una
+  repisa plana atravesándolo).
+- Ejemplo hecho así en `humano/orco/`: los cuatro paneles ya limpios, el .glb y sus vistas.
 - Prueba de punta a punta (con el servidor en marcha):
   `node .claude/skills/salon3d-glb/scripts/probar_humano.cjs frente.png salida/v1 [espalda.png] [salida.glb]`
-  (`ANIM=walk` deja puesta una animación, `SIN_RIG=1` construye sin esqueleto).
+  (`ANIM=walk` deja puesta una animación, `SIN_RIG=1` construye sin esqueleto,
+  `CAPAS_FRENTE` y `CAPAS_ESPALDA` cargan los mapas pintados, y `METAL`, `NORMALES`,
+  `PROFUNDIDAD`, `RELIEVE`, `CAPAS`, `CARA` y `FILAS` mueven los deslizadores).
 - Referencias de peso: unos 35.000 vértices, 68.000 triángulos y 3,4 MB con esqueleto y
   cuatro animaciones. Para meterlo en un juego, pásalo luego por "Optimizar GLB por zonas",
   que conserva huesos y animaciones.

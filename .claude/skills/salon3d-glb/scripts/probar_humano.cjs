@@ -9,6 +9,8 @@
  *   URL=http://127.0.0.1:5173   servidor de la app
  *   ANIM=walk                   animación a dejar puesta antes de capturar
  *   SIN_RIG=1                   construir sin esqueleto
+ *   CAPAS_FRENTE=mapa.png       mapa de capas pintado de la vista de frente
+ *   CAPAS_ESPALDA=mapa.png      mapa de capas pintado de la vista de espalda
  */
 const { chromium } = require('playwright');
 const fs = require('fs');
@@ -49,7 +51,24 @@ const ANIM = process.env.ANIM || '';
   if (backPath && fs.existsSync(backPath)) {
     await inputs.nth(1).setInputFiles(path.resolve(backPath));
   }
+  if (process.env.CAPAS_FRENTE && fs.existsSync(process.env.CAPAS_FRENTE)) {
+    await inputs.nth(2).setInputFiles(path.resolve(process.env.CAPAS_FRENTE));
+  }
+  if (process.env.CAPAS_ESPALDA && fs.existsSync(process.env.CAPAS_ESPALDA)) {
+    await inputs.nth(3).setInputFiles(path.resolve(process.env.CAPAS_ESPALDA));
+  }
   await page.waitForTimeout(600);
+
+  // Ajustes por deslizador: METAL=0.15 NORMALES=0.6 PROFUNDIDAD=1 RELIEVE=0.5 CAPAS=1 CARA=1
+  // Los deslizadores van en orden fijo dentro del panel.
+  const sliders = ['PROFUNDIDAD', 'RELIEVE', 'CARA', 'CAPAS', 'FILAS', 'METAL', 'NORMALES'];
+  const ranges = container.locator('input[type="range"]');
+  for (let i = 0; i < sliders.length; i++) {
+    const v = process.env[sliders[i]];
+    if (!v) continue;
+    await ranges.nth(i).fill(v);
+    await page.waitForTimeout(120);
+  }
 
   if (process.env.SIN_RIG === '1') {
     await container.getByText('Esqueleto y animaciones', { exact: true }).click();
